@@ -11,9 +11,11 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -63,8 +65,7 @@ public final class StandaloneDeploymentOwner implements AutoCloseable {
             initializeLockFile(root.canonicalRoot(), lockPath);
             Object rootKey = fileKey(root.canonicalRoot());
             Object lockKey = fileKey(lockPath);
-            channel = FileChannel.open(lockPath,
-                    Set.of(StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS));
+            channel = openLockChannelWithRetry(lockPath);
             fileLock = channel.tryLock();
             if (fileLock == null) {
                 throw StandaloneDeploymentOwnerException.unavailable();
@@ -75,7 +76,10 @@ public final class StandaloneDeploymentOwner implements AutoCloseable {
             if (exception instanceof StandaloneDeploymentOwnerException ownerFailure) {
                 throw ownerFailure;
             }
-            throw StandaloneDeploymentOwnerException.unavailable();
+            // LOCAL-DEV-WINDOWS PATCH (not for upstream): attach the real cause so we can diagnose which step failed.
+            StandaloneDeploymentOwnerException unavailable = StandaloneDeploymentOwnerException.unavailable();
+            unavailable.initCause(exception);
+            throw unavailable;
         }
     }
 
@@ -115,7 +119,11 @@ public final class StandaloneDeploymentOwner implements AutoCloseable {
         try {
             SecureSetupFile.create(root, lockPath, LOCK_CONTENT);
         } catch (FileAlreadyExistsException existing) {
+            // LOCAL-DEV-WINDOWS PATCH (not for upstream): a stale lock file from a previous run may exist with an
+            // older owner-only DACL that omitted permissions such as FILE_READ_EA / FILE_WRITE_EA. Re-enforce the
+            // DACL through the current process (the file's owner) so subsequent reopen succeeds on Windows.
             // The lock inode is persistent and is never unlinked during normal shutdown.
+            SecureSetupFile.enforceOwnerOnly(lockPath);
         }
         if (!SecureSetupFile.existsInsideRootWithoutLinks(root, lockPath)
                 || !SecureSetupFile.isOwnerOnlyRegularFile(lockPath)) {
@@ -124,10 +132,56 @@ public final class StandaloneDeploymentOwner implements AutoCloseable {
         SecureSetupFile.forceParentDirectoryIfSupported(root, lockPath);
     }
 
+    /**
+     * LOCAL-DEV-WINDOWS PATCH (not for upstream): Windows Defender / Search Indexer can briefly hold a deny-share
+     * handle on newly-created files while they scan or index them, which makes the immediate reopen in {@link
+     * #acquire} fail with {@link AccessDeniedException}. Retry the reopen several times with a longer total
+     * backoff before giving up, so transient scanner / indexer interference does not abort standalone startup.
+     * See the upstream issue draft ISSUE_DRAFT_standalone_windows_filekey.md for the proposed long-term fix.
+     */
+    private static FileChannel openLockChannelWithRetry(Path lockPath) throws IOException {
+        Set<OpenOption> options = Set.of(
+                StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+        long[] delaysMillis = {0L, 250L, 750L, 1500L, 3000L, 5000L, 8000L};
+        AccessDeniedException lastFailure = null;
+        for (int attempt = 0; attempt < delaysMillis.length; attempt++) {
+            long delay = delaysMillis[attempt];
+            if (delay > 0L) {
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    if (lastFailure != null) {
+                        throw lastFailure;
+                    }
+                    throw new IOException("Interrupted while retrying lock channel open", interrupted);
+                }
+            }
+            try {
+                FileChannel channel = FileChannel.open(lockPath, options);
+                if (attempt > 0) {
+                    System.err.println("[StandaloneDeploymentOwner] lock channel reopen succeeded after "
+                            + (attempt + 1) + " attempt(s); Windows scanner/indexer released the deny-share handle.");
+                }
+                return channel;
+            } catch (AccessDeniedException denied) {
+                lastFailure = denied;
+                System.err.println("[StandaloneDeploymentOwner] lock channel reopen attempt "
+                        + (attempt + 1) + "/" + delaysMillis.length
+                        + " denied; sleeping " + delay + "ms before next try (likely Windows Defender / Search Indexer).");
+            }
+        }
+        throw lastFailure;
+    }
+
     private static Object fileKey(Path path) throws IOException {
         Object key = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey();
         if (key == null) {
-            throw new IOException("Standalone deployment owner identity is unavailable");
+            // LOCAL-DEV-WINDOWS PATCH (not for upstream): BasicFileAttributes.fileKey() always returns null on
+            // Windows (JDK platform limitation), so the strict identity check makes standalone startup impossible
+            // there. Fall back to a canonical-path identity for local development; see the upstream issue draft
+            // ISSUE_DRAFT_standalone_windows_filekey.md for the proposed long-term fix.
+            return path.toRealPath();
         }
         return key;
     }

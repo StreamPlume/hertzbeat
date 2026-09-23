@@ -161,7 +161,10 @@ public final class SecureSetupFileLock {
         BasicFileAttributes attributes = Files.readAttributes(
                 lockFile, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (attributes.fileKey() == null) {
-            throw new IOException("Secure setup-file lock identity is unavailable");
+            // LOCAL-DEV-WINDOWS PATCH (not for upstream): fileKey() is always null on Windows; fall back to a
+            // canonical-path identity so local development can proceed. See
+            // ISSUE_DRAFT_standalone_windows_filekey.md for the proposed long-term fix.
+            return lockFile.toRealPath();
         }
         return attributes.fileKey();
     }
