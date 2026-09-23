@@ -22,13 +22,19 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import org.apache.hertzbeat.common.entity.dto.Message;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrend;
 import org.apache.hertzbeat.common.entity.dto.PageResponse;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.investigation.InvestigationWindow;
+import org.apache.hertzbeat.common.observability.dto.investigation.LogInvestigationView;
+import org.apache.hertzbeat.common.observability.dto.log.HistoricalLogRow;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenRequestContext;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenScopes;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.observability.ingestion.semantic.OtlpResourceSemanticAttributes;
+import org.apache.hertzbeat.observability.investigation.service.LogInvestigationReadModelService;
 import org.apache.hertzbeat.observability.logs.service.LogQueryService;
 import org.apache.hertzbeat.observability.shared.query.CollectorResourceScope;
 import org.apache.hertzbeat.observability.shared.query.TelemetryQueryContextScope;
@@ -50,20 +56,25 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Log Query Controller")
 public class LogQueryController {
 
+    private static final Pattern LOG_RECORD_UID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
+
     private final LogQueryService logQueryService;
     private final ObservabilityQueryAdmissionService queryAdmissionService;
+    private final LogInvestigationReadModelService logInvestigationReadModelService;
 
     @Autowired
     public LogQueryController(LogQueryService logQueryService,
-                              ObservabilityQueryAdmissionService queryAdmissionService) {
+                              ObservabilityQueryAdmissionService queryAdmissionService,
+                              LogInvestigationReadModelService logInvestigationReadModelService) {
         this.logQueryService = logQueryService;
         this.queryAdmissionService = queryAdmissionService;
+        this.logInvestigationReadModelService = logInvestigationReadModelService;
     }
 
     @GetMapping("/list")
     @Operation(summary = "Query logs by time range with optional filters",
             description = "Query logs by [start,end] in ms and optional filters with pagination. Returns paginated log entries sorted by timestamp in descending order.")
-    public ResponseEntity<Message<PageResponse<LogEntry>>> list(
+    public ResponseEntity<Message<PageResponse<HistoricalLogRow>>> list(
             @Parameter(description = "Observed entity ID for entity-first context resolution", example = "87584674384")
             @RequestParam(value = "entityId", required = false) Long entityId,
             @Parameter(description = "Observed entity type for entity-first resource filtering", example = "service")
@@ -111,53 +122,26 @@ public class LogQueryController {
                 severityNumber, severityText, search,
                 serviceName, serviceNamespace, environment, scopedFilters.resourceFilter(), scopedFilters.attributeFilter(),
                 pageIndex, pageSize, hideInternal, hideNoise));
-        return ResponseEntity.ok(Message.success(PageResponse.from(result)));
+        return ResponseEntity.ok(Message.success(PageResponse.from(result.map(HistoricalLogRow::from))));
     }
 
     @GetMapping("/context")
-    @Operation(summary = "Query log context around a selected log",
-            description = "Return surrounding logs around a selected log timestamp. The response contains bounded before, selected, and after rows for log-detail context inspection.")
-    public ResponseEntity<Message<Map<String, Object>>> context(
-            @Parameter(description = "Observed entity ID for entity-first context resolution", example = "87584674384")
-            @RequestParam(value = "entityId", required = false) Long entityId,
-            @Parameter(description = "Observed entity type for entity-first resource filtering", example = "service")
-            @RequestParam(value = "entityType", required = false) String entityType,
-            @Parameter(description = "Selected log timestamp in nanoseconds", example = "1734005477630000000")
-            @RequestParam(value = "logTimeUnixNano") Long logTimeUnixNano,
-            @Parameter(description = "Optional context window start timestamp in milliseconds", example = "1734005177000")
-            @RequestParam(value = "start", required = false) Long start,
-            @Parameter(description = "Optional context window end timestamp in milliseconds", example = "1734005777000")
-            @RequestParam(value = "end", required = false) Long end,
-            @Parameter(description = "OTel service.name resource attribute", example = "checkout")
-            @RequestParam(value = "serviceName", required = false) String serviceName,
-            @Parameter(description = "OTel service.namespace resource attribute", example = "payments")
-            @RequestParam(value = "serviceNamespace", required = false) String serviceNamespace,
-            @Parameter(description = "OTel deployment.environment.name resource attribute", example = "prod")
-            @RequestParam(value = "environment", required = false) String environment,
-            @RequestParam(value = "collectorId", required = false) String collectorId,
-            @RequestParam(value = "instance", required = false) String instance,
-            @RequestParam(value = "endpoint", required = false) String endpoint,
-            @Parameter(description = "Resource attribute filter expression, for example service.version=1.2.3")
-            @RequestParam(value = "resourceFilter", required = false) String resourceFilter,
-            @Parameter(description = "Log attribute filter expression, for example http.route:/checkout")
-            @RequestParam(value = "attributeFilter", required = false) String attributeFilter,
-            @Parameter(description = "Number of logs to return on each side of the selected log", example = "10")
-            @RequestParam(value = "limit", required = false, defaultValue = "10") Integer limit,
-            @Parameter(description = "Optional directional context page, either before or after")
-            @RequestParam(value = "direction", required = false) String direction,
-            @Parameter(description = "Optional directional cursor timestamp in nanoseconds")
-            @RequestParam(value = "cursorLogTimeUnixNano", required = false) Long cursorLogTimeUnixNano,
-            @Parameter(description = "Hide internal workspace infrastructure logs such as collector/exporter self logs", example = "true")
-            @RequestParam(value = "hideInternal", required = false, defaultValue = "false") boolean hideInternal,
-            @Parameter(description = "Hide demo infrastructure noise logs such as kafka/load-generator when focusing on business requests", example = "true")
-            @RequestParam(value = "hideNoise", required = false, defaultValue = "false") boolean hideNoise) {
+    @Operation(summary = "Query one bounded Log investigation")
+    public ResponseEntity<Message<LogInvestigationView>> context(
+            @RequestParam("logRecordUid") String logRecordUid,
+            @RequestParam("start") long start,
+            @RequestParam("end") long end) {
+        validateInvestigationSelection(logRecordUid, start, end);
         String workspaceId = trustedWorkspaceId();
-        ScopedFilters scopedFilters = scopeFilters(
-                entityId, entityType, collectorId, instance, endpoint, resourceFilter, attributeFilter);
-        return ResponseEntity.ok(Message.success(executeQuery(() -> logQueryService.context(
-                workspaceId, entityId, logTimeUnixNano, start, end, serviceName, serviceNamespace, environment,
-                scopedFilters.resourceFilter(), scopedFilters.attributeFilter(), limit, direction,
-                cursorLogTimeUnixNano, hideInternal, hideNoise))));
+        return ResponseEntity.ok(Message.success(executeQuery(() ->
+                logInvestigationReadModelService.query(workspaceId, logRecordUid, start, end))));
+    }
+
+    private static void validateInvestigationSelection(String logRecordUid, long start, long end) {
+        if (logRecordUid == null || !LOG_RECORD_UID.matcher(logRecordUid).matches()) {
+            throw new IllegalArgumentException("logRecordUid has an invalid format");
+        }
+        new InvestigationWindow(start, end);
     }
 
     @GetMapping("/stats/overview")
@@ -258,8 +242,8 @@ public class LogQueryController {
 
     @GetMapping("/stats/trend")
     @Operation(summary = "Log trend over time",
-            description = "Count logs by hour intervals with filters. Groups logs by hour and provides time-series data for trend analysis.")
-    public ResponseEntity<Message<Map<String, Object>>> trendStats(
+            description = "Count logs with filters using an adaptive, epoch-aligned time interval.")
+    public ResponseEntity<Message<LogTrend>> trendStats(
             @Parameter(description = "Observed entity ID for entity-first context resolution", example = "87584674384")
             @RequestParam(value = "entityId", required = false) Long entityId,
             @Parameter(description = "Observed entity type for entity-first resource filtering", example = "service")

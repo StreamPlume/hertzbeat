@@ -1,6 +1,6 @@
 # HertzBeat React agent guide
 
-This directory contains the active HertzBeat 2.0 frontend: Vite, React 19,
+This directory contains the active HertzBeat 2.0 frontend: Vite, React 18,
 Refine 5, Ant Design 5, TanStack Query 5, and React Router 7. Do not restore
 Next.js or Angular conventions and do not create another frontend project.
 

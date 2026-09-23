@@ -9,10 +9,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { Monitor } from './monitor-contract';
 import {
+  buildMonitorInvestigationEntityPath,
   buildMonitorInvestigationSignalPath,
   createMonitorInvestigation,
   monitorInvestigationWindow,
-  type MonitorInvestigationBinding
+  type MonitorInvestigationIdentity
 } from './monitor-investigation-model';
 
 const monitor: Monitor = {
@@ -23,7 +24,7 @@ const monitor: Monitor = {
   status: 1
 };
 
-const binding: MonitorInvestigationBinding = {
+const binding: MonitorInvestigationIdentity = {
   monitorId: 42,
   entityId: 7,
   entityType: 'service',
@@ -75,14 +76,24 @@ describe('monitor investigation handoff', () => {
     expect(buildMonitorInvestigationSignalPath(investigation, 'logs')).toBeUndefined();
   });
 
+  it('preserves the exact investigation window on a bound Entity handoff', () => {
+    expect(
+      buildMonitorInvestigationEntityPath(7, {
+        from: 1_723_454_400_000,
+        to: 1_723_456_200_000,
+        timeZone: 'Asia/Shanghai'
+      })
+    ).toBe('/entities/7?start=1723454400000&end=1723456200000&timeZone=Asia%2FShanghai');
+  });
+
   it.each([
     ['30m', 30 * 60_000],
     ['1h', 60 * 60_000],
     ['6h', 6 * 60 * 60_000],
     ['24h', 24 * 60 * 60_000],
-    ['1W', 7 * 24 * 60 * 60_000],
-    ['4W', 28 * 24 * 60 * 60_000],
-    ['12W', 84 * 24 * 60 * 60_000]
+    ['1W', 24 * 60 * 60_000],
+    ['4W', 24 * 60 * 60_000],
+    ['12W', 24 * 60 * 60_000]
   ] as const)('turns the visible %s history range into one immutable exact window', (history, duration) => {
     expect(monitorInvestigationWindow(history, 1_800_000_000_000, 'Asia/Shanghai')).toEqual({
       from: 1_800_000_000_000 - duration,

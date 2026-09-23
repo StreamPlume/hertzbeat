@@ -21,7 +21,7 @@ import { MonitorContractError, type MonitorAction, type MonitorQuery } from '../
 import { writeMonitorQuery } from '../model/monitor-query';
 import { parseMonitorApps, parseMonitorNavigationApps } from './monitor-apps-schema';
 import { parseMonitorDetail } from './monitor-detail-schema';
-import { parseMonitorInvestigationBinding } from './monitor-investigation-schema';
+import { parseMonitorInvestigation } from './monitor-investigation-schema';
 import { parseMonitorPage } from './monitor-page-schema';
 
 export { detectMonitor, loadMonitorCollectors, loadMonitorParamDefines, saveMonitor } from './monitor-editor-api';
@@ -132,11 +132,22 @@ export async function loadMonitorDetail(id: string | number, signal?: AbortSigna
   return parseMonitorDetail(value, requestedId);
 }
 
-export async function loadMonitorInvestigationBinding(id: number, signal?: AbortSignal) {
-  if (!Number.isSafeInteger(id) || id <= 0) throw new MonitorContractError();
-  const path = `/api/monitor/${id}/investigation`;
+export async function loadMonitorInvestigation(id: number, window: { from: number; to: number }, signal?: AbortSignal) {
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    !Number.isSafeInteger(window.from) ||
+    !Number.isSafeInteger(window.to) ||
+    window.from <= 0 ||
+    window.to <= window.from ||
+    window.to - window.from > 86_400_000
+  ) {
+    throw new MonitorContractError();
+  }
+  const params = new URLSearchParams({ start: String(window.from), end: String(window.to) });
+  const path = `/api/monitor/${id}/investigation?${params.toString()}`;
   const value = signal ? await apiMessageGet(path, { signal }) : await apiMessageGet(path);
-  return parseMonitorInvestigationBinding(value, id);
+  return parseMonitorInvestigation(value, id, window);
 }
 
 export function mutateMonitors(action: MonitorAction, ids: number[], signal?: AbortSignal) {

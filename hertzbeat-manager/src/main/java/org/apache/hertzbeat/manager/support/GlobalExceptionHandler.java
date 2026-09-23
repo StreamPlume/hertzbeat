@@ -29,6 +29,7 @@ import org.apache.hertzbeat.common.transaction.MetadataWriteAdmissionException;
 import org.apache.hertzbeat.common.entity.dto.Message;
 import org.apache.hertzbeat.common.support.exception.CommonException;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
+import org.apache.hertzbeat.observability.shared.query.ObservabilityQueryRequestException;
 import org.apache.hertzbeat.alert.notice.AlertNoticeException;
 import org.apache.hertzbeat.manager.support.exception.MonitorDatabaseException;
 import org.apache.hertzbeat.manager.support.exception.MonitorDetectException;
@@ -84,6 +85,14 @@ public class GlobalExceptionHandler {
         log.warn("[telemetry storage unavailable]");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Message.fail(FAIL_CODE, TELEMETRY_STORAGE_UNAVAILABLE_MESSAGE));
+    }
+
+    /** Return a stable HTTP error without echoing rejected query content. */
+    @ExceptionHandler(ObservabilityQueryRequestException.class)
+    @ResponseBody
+    ResponseEntity<Message<Void>> handleObservabilityQueryRequestException() {
+        return ResponseEntity.badRequest()
+                .body(Message.fail(PARAM_INVALID_CODE, ObservabilityQueryRequestException.ERROR_CODE));
     }
 
     /** Return a retryable, cache-safe maintenance response without logging private state. */

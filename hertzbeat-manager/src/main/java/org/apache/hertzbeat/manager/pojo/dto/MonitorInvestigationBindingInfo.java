@@ -17,11 +17,13 @@
 
 package org.apache.hertzbeat.manager.pojo.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 
 /**
  * Exact entity and signal identity available for one monitor investigation.
  */
+@JsonInclude(JsonInclude.Include.ALWAYS)
 public record MonitorInvestigationBindingInfo(Long monitorId,
                                               Long entityId,
                                               String entityType,

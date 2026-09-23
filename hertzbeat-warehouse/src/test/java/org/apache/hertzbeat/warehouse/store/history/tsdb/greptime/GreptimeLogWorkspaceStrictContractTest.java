@@ -129,8 +129,8 @@ class GreptimeLogWorkspaceStrictContractTest {
                 row.put("totalCount", invalidCount);
                 return List.of(row);
             }
-            if (sql.contains("date_bin('1 hour'")) {
-                return List.of(Map.of("hour", "2026-08-15 14:00", "count", invalidCount));
+            if (sql.contains("date_bin('1 minute'")) {
+                return List.of(Map.of("bucket", "2026-08-15 14:00", "count", invalidCount));
             }
             return List.of(Map.of("groupValue", "checkout", "count", invalidCount));
         });
@@ -139,7 +139,7 @@ class GreptimeLogWorkspaceStrictContractTest {
                 () -> assertCauseFreeUnavailable(this::logCount),
                 () -> assertCauseFreeUnavailable(this::severityBuckets),
                 () -> assertCauseFreeUnavailable(this::traceCoverage),
-                () -> assertCauseFreeUnavailable(this::hourlyStats),
+                () -> assertCauseFreeUnavailable(this::intervalStats),
                 () -> assertCauseFreeUnavailable(this::groupStats));
     }
 
@@ -184,8 +184,8 @@ class GreptimeLogWorkspaceStrictContractTest {
                 row.put("withSpan", 3);
                 return List.of(row);
             }
-            if (sql.contains("date_bin('1 hour'")) {
-                return List.of(Map.of("hour", "2026-08-15 14:00", "count", 4));
+            if (sql.contains("date_bin('1 minute'")) {
+                return List.of(Map.of("bucket", "2026-08-15 14:00", "count", 4));
             }
             return List.of(Map.of("groupValue", "checkout", "count", 5));
         });
@@ -196,7 +196,7 @@ class GreptimeLogWorkspaceStrictContractTest {
                 () -> assertEquals(2L, severityBuckets().get("errorCount")),
                 () -> assertEquals(0L, traceCoverage().get("withTrace")),
                 () -> assertEquals(3L, traceCoverage().get("withSpan")),
-                () -> assertEquals(List.of(4L), List.copyOf(hourlyStats().values())),
+                () -> assertEquals(List.of(4L), intervalStats().stream().map(bucket -> bucket.count()).toList()),
                 () -> assertEquals(Map.of("checkout", 5L), groupStats()));
     }
 
@@ -221,8 +221,8 @@ class GreptimeLogWorkspaceStrictContractTest {
                 row.put("withTrace", count);
                 return List.of(row);
             }
-            return sql.contains("date_bin('1 hour'")
-                    ? List.of(Map.of("hour", "2026-08-15 14:00", "count", count))
+            return sql.contains("date_bin('1 minute'")
+                    ? List.of(Map.of("bucket", "2026-08-15 14:00", "count", count))
                     : List.of(Map.of("groupValue", "checkout", "count", count));
         });
 
@@ -230,7 +230,7 @@ class GreptimeLogWorkspaceStrictContractTest {
                 () -> assertEquals(expected, logCount()),
                 () -> assertEquals(expected, severityBuckets().get("errorCount")),
                 () -> assertEquals(expected, traceCoverage().get("withTrace")),
-                () -> assertEquals(List.of(expected), List.copyOf(hourlyStats().values())),
+                () -> assertEquals(List.of(expected), intervalStats().stream().map(bucket -> bucket.count()).toList()),
                 () -> assertEquals(expected, groupStats().get("checkout")));
     }
 
@@ -241,17 +241,17 @@ class GreptimeLogWorkspaceStrictContractTest {
             if (sql.startsWith("SELECT COUNT(*) as count")) {
                 return List.of(Map.of("count", 1.5d));
             }
-            return List.of(Map.of("hour", 1_734_005_477_630_000_000L, "count", 2.5d));
+            return List.of(Map.of("bucket", 1_734_005_477_630_000_000L, "count", 2.5d));
         });
 
         long count = storage.countLogsByMultipleConditions(
                 null, null, null, null, null, null, null, Set.of(), false, null);
-        Map<String, Long> hourly = storage.countLogsByHour(
-                null, null, null, null, null, null, null,
+        var intervals = storage.countLogsByInterval(
+                null, null, 60_000L, null, null, null, null, null,
                 Set.of(), false, null, null, null, null, Map.of(), Map.of());
 
         assertEquals(1L, count);
-        assertEquals(List.of(2L), List.copyOf(hourly.values()));
+        assertEquals(List.of(2L), intervals.stream().map(bucket -> bucket.count()).toList());
     }
 
     @Test
@@ -268,8 +268,8 @@ class GreptimeLogWorkspaceStrictContractTest {
                                 null, null, null, null, null, null, null,
                                 Set.of(), false, "team-a", null, null, null, Map.of(), Map.of())),
                 () -> assertThrows(TelemetryStorageUnavailableException.class,
-                        () -> storage.countLogsByHour(
-                                null, null, null, null, null, null, null,
+                        () -> storage.countLogsByInterval(
+                                null, null, 60_000L, null, null, null, null, null,
                                 Set.of(), false, "team-a", null, null, null, Map.of(), Map.of())),
                 () -> assertThrows(TelemetryStorageUnavailableException.class,
                         () -> storage.countLogsByGroup(
@@ -313,7 +313,7 @@ class GreptimeLogWorkspaceStrictContractTest {
         when(queryExecutor.executeStrict(anyString())).thenReturn(List.of());
 
         assertAll(
-                () -> assertEquals(Map.of(), hourlyStats()),
+                () -> assertEquals(List.of(), intervalStats()),
                 () -> assertEquals(Map.of(), groupStats()));
     }
 
@@ -321,13 +321,13 @@ class GreptimeLogWorkspaceStrictContractTest {
     void scopedGroupedAggregatesRejectMissingOrNonNumericRequiredAliases() {
         when(queryExecutor.executeStrict(anyString()))
                 .thenReturn(List.of(Map.of("count", 1)))
-                .thenReturn(List.of(Map.of("hour", "2026-08-15 14:00", "count", "not-a-number")))
+                .thenReturn(List.of(Map.of("bucket", "2026-08-15 14:00", "count", "not-a-number")))
                 .thenReturn(List.of(Map.of("count", 1)))
                 .thenReturn(List.of(Map.of("groupValue", "checkout", "count", "not-a-number")));
 
         assertAll(
-                () -> assertThrows(TelemetryStorageUnavailableException.class, this::hourlyStats),
-                () -> assertThrows(TelemetryStorageUnavailableException.class, this::hourlyStats),
+                () -> assertThrows(TelemetryStorageUnavailableException.class, this::intervalStats),
+                () -> assertThrows(TelemetryStorageUnavailableException.class, this::intervalStats),
                 () -> assertThrows(TelemetryStorageUnavailableException.class, this::groupStats),
                 () -> assertThrows(TelemetryStorageUnavailableException.class, this::groupStats));
     }
@@ -362,8 +362,8 @@ class GreptimeLogWorkspaceStrictContractTest {
         storage.countLogTraceCoverage(
                 null, null, null, null, null, null, null,
                 Set.of(), false, "team-a", null, null, null, Map.of(), Map.of());
-        storage.countLogsByHour(
-                null, null, null, null, null, null, null,
+        storage.countLogsByInterval(
+                null, null, 60_000L, null, null, null, null, null,
                 Set.of(), false, "team-a", null, null, null, Map.of(), Map.of());
         storage.countLogsByGroup(
                 null, null, null, null, null, null, null,
@@ -429,9 +429,9 @@ class GreptimeLogWorkspaceStrictContractTest {
                 Set.of(), false, "team-a", null, null, null, Map.of(), Map.of());
     }
 
-    private Map<String, Long> hourlyStats() {
-        return storage.countLogsByHour(
-                null, null, null, null, null, null, null,
+    private java.util.List<org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket> intervalStats() {
+        return storage.countLogsByInterval(
+                null, null, 60_000L, null, null, null, null, null,
                 Set.of(), false, "team-a", null, null, null, Map.of(), Map.of());
     }
 

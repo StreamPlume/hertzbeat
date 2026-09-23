@@ -81,6 +81,7 @@ export const appRouteCatalog = {
   alerts: pageRoute('alerts', alertRoutePaths.center, {
     resource: { labelKey: 'menu.alerts' }
   }),
+  'alert-investigation': pageRoute('alert-investigation', alertRoutePaths.investigation),
   'alert-rules': pageRoute('alert-rules', alertRoutePaths.rules, {
     resource: { labelKey: 'alertRules.title' }
   }),

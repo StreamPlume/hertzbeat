@@ -415,6 +415,7 @@ function controller(
       hasMoreRealtimeGroups: false,
       historyAvailability: { kind: 'available' },
       historyCharts: [],
+      investigation: { kind: 'inactive' },
       investigationSignals: [],
       hasMoreHistoryCharts: false,
       realtime: { kind: 'ready', rows: [metricRow('value', '12')] },

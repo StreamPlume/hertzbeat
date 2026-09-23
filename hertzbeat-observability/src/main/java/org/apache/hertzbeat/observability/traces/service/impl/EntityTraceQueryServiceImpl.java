@@ -54,6 +54,7 @@ import org.apache.hertzbeat.common.observability.dto.trace.EntityTraceSummaryDto
 import org.apache.hertzbeat.common.observability.dto.trace.TraceDetailDto;
 import org.apache.hertzbeat.common.observability.dto.trace.TraceListItemDto;
 import org.apache.hertzbeat.common.observability.dto.trace.TraceOverviewDto;
+import org.apache.hertzbeat.common.observability.dto.trace.TraceServiceStatsDto;
 import org.apache.hertzbeat.common.observability.dto.trace.TraceSpanEventDto;
 import org.apache.hertzbeat.common.observability.dto.trace.TraceSpanLinkDto;
 import org.apache.hertzbeat.common.observability.dto.trace.TraceSpanNodeDto;
@@ -100,6 +101,7 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
     private static final BigInteger LONG_MIN_VALUE = BigInteger.valueOf(Long.MIN_VALUE);
     private static final BigDecimal LONG_MAX_DECIMAL = BigDecimal.valueOf(Long.MAX_VALUE);
     private static final BigDecimal LONG_MIN_DECIMAL = BigDecimal.valueOf(Long.MIN_VALUE);
+    private static final Pattern NON_NEGATIVE_DECIMAL_PATTERN = Pattern.compile("^(0|[1-9][0-9]*)$");
     private static final Pattern RESOURCE_FILTER_LIST_OPERATOR_PATTERN = Pattern.compile(
             "^\\s*([A-Za-z0-9._:-]+)\\s+(NOT\\s+IN|IN)\\s*(\\(.+\\))\\s*$",
             Pattern.CASE_INSENSITIVE);
@@ -137,12 +139,8 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
         int pageSize = normalizeTraceListPageSize(limit);
         List<Map<String, Object>> rows = traceQueryRepository.queryTraceListRows(
                 start, end, false, null, null, null, trustedWorkspaceId, Map.of(), false, 0, pageSize);
-        List<TraceListItemDto> items = rows == null ? List.of() : rows.stream().map(this::toTraceListItem).toList();
-        long total = rows == null ? 0L : rows.stream()
-                .map(row -> readLongValue(row, "total_count", "totalCount"))
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse((long) items.size());
+        List<TraceListItemDto> items = toTraceListItems(rows);
+        long total = validatedTraceListTotal(rows, 0L, items.size());
         return new PageImpl<>(items, PageRequest.of(0, pageSize), total);
     }
 
@@ -352,14 +350,8 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
                             repositoryOffset,
                             pageRequest.getPageSize()
                     );
-            List<TraceListItemDto> items = rows.stream()
-                    .map(this::toTraceListItem)
-                    .toList();
-            long total = rows.stream()
-                    .map(row -> readLongValue(row, "total_count", "totalCount"))
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElse((long) pageRequest.getOffset() + items.size());
+            List<TraceListItemDto> items = toTraceListItems(rows);
+            long total = validatedTraceListTotal(rows, pageRequest.getOffset(), items.size());
             return new PageImpl<>(items, pageRequest, total);
         }
         List<TraceAggregate> filtered = aggregateTraceRows(trustedWorkspaceId, queryRowsForList(
@@ -1843,29 +1835,147 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
                 aggregate.getStatus(),
                 aggregate.getStartTime(),
                 aggregate.getErrorSpanCount(),
+                null,
+                null,
                 aggregate.getResourceAttributes()
         );
     }
 
-    private TraceListItemDto toTraceListItem(Map<String, Object> row) {
-        Map<String, String> resourceAttributes = parseAttributes(row.get("resource_attributes"), "resource_attributes.", row);
-        String serviceName = defaultText(readText(row, "service_name"), resourceAttributes.get("service.name"));
-        String serviceNamespace = defaultText(readText(row, "service_namespace"),
-                resourceAttributes.get("service.namespace"));
-        String status = normalizeStatus(defaultText(readText(row, "span_status_code"), readText(row, "status")));
-        Integer errorSpanCount = readNonNegativeIntValue(row, "error_span_count", "errorSpanCount");
+    private List<TraceListItemDto> toTraceListItems(List<Map<String, Object>> rows) {
+        if (CollectionUtils.isEmpty(rows)) {
+            return List.of();
+        }
+        if (rows.size() > TraceQueryRepository.MAX_TRACE_LIST_SERVICE_ROWS) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        Long serviceRowCount = readConsistentNonNegativeLong(rows, "service_row_count", "serviceRowCount");
+        if (serviceRowCount == null || serviceRowCount != rows.size()
+                || serviceRowCount > TraceQueryRepository.MAX_TRACE_LIST_SERVICE_ROWS) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        Map<String, List<Map<String, Object>>> rowsByTrace = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String traceId = readText(row, "trace_id");
+            if (!StringUtils.hasText(traceId)) {
+                throw new TelemetryStorageUnavailableException();
+            }
+            rowsByTrace.computeIfAbsent(traceId, ignored -> new ArrayList<>()).add(row);
+        }
+        return rowsByTrace.values().stream().map(this::toTraceListItem).toList();
+    }
+
+    private long validatedTraceListTotal(List<Map<String, Object>> rows, long offset, int itemCount) {
+        long minimumTotal;
+        try {
+            minimumTotal = Math.addExact(offset, itemCount);
+        } catch (ArithmeticException ignored) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        if (CollectionUtils.isEmpty(rows)) {
+            return minimumTotal;
+        }
+        Long total = null;
+        for (Map<String, Object> row : rows) {
+            Long rowTotal = readLongValue(row, "total_count", "totalCount");
+            if (rowTotal == null || rowTotal < 0 || total != null && !total.equals(rowTotal)) {
+                throw new TelemetryStorageUnavailableException();
+            }
+            total = rowTotal;
+        }
+        if (total == null || total < minimumTotal) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        return total;
+    }
+
+    private TraceListItemDto toTraceListItem(List<Map<String, Object>> traceRows) {
+        Map<String, Object> firstRow = traceRows.getFirst();
+        Long rootSpanCount = readConsistentNonNegativeLong(traceRows, "root_span_count", "rootSpanCount");
+        List<Map<String, Object>> rootRows = traceRows.stream()
+                .filter(row -> StringUtils.hasText(readText(row, "root_span_id")))
+                .toList();
+        boolean hasUniqueRoot = Long.valueOf(1L).equals(rootSpanCount) && rootRows.size() == 1;
+        Map<String, Object> rootRow = hasUniqueRoot ? rootRows.getFirst() : firstRow;
+        Map<String, String> resourceAttributes = hasUniqueRoot
+                ? parseAttributes("resource_attributes.", rootRow) : Collections.emptyMap();
+        String serviceName = hasUniqueRoot
+                ? defaultText(readText(rootRow, "service_name"), resourceAttributes.get("service.name")) : null;
+        String serviceNamespace = hasUniqueRoot
+                ? defaultText(readText(rootRow, "service_namespace"), resourceAttributes.get("service.namespace")) : null;
+        String status = normalizeStatus(defaultText(
+                readText(firstRow, "span_status_code"), readText(firstRow, "status")));
+        Long errorCount = readConsistentNonNegativeLong(traceRows, "error_span_count", "errorSpanCount");
+        Long spanCount = readConsistentNonNegativeLong(traceRows, "span_count", "spanCount");
+        if (errorCount == null || errorCount > Integer.MAX_VALUE) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        Map<String, TraceServiceStatsDto> serviceStats = validatedServiceStats(
+                traceRows, spanCount, errorCount);
         return new TraceListItemDto(
-                readText(row, "trace_id"),
-                defaultText(readText(row, "root_span_id"), readText(row, "span_id")),
+                readText(firstRow, "trace_id"),
+                hasUniqueRoot ? readText(rootRow, "root_span_id") : null,
                 serviceName,
                 serviceNamespace,
-                defaultText(readText(row, "root_span_name"), defaultText(readText(row, "span_name"), readText(row, "name"))),
-                readNonNegativeLong(row, "duration_nano"),
+                hasUniqueRoot ? readText(rootRow, "root_span_name") : null,
+                hasUniqueRoot ? readNonNegativeLong(rootRow, "duration_nano") : null,
                 status,
-                readTimestamp(row, "timestamp"),
-                errorSpanCount == null ? ("error".equals(status) ? 1 : 0) : errorSpanCount,
+                hasUniqueRoot ? readTimestamp(rootRow, "timestamp") : null,
+                errorCount.intValue(),
+                spanCount,
+                serviceStats,
                 resourceAttributes
         );
+    }
+
+    private Long readConsistentNonNegativeLong(List<Map<String, Object>> rows, String... keys) {
+        Long expected = null;
+        for (Map<String, Object> row : rows) {
+            Long value = readOptionalNonNegativeLong(row, keys);
+            if (value == null || expected != null && !expected.equals(value)) {
+                return null;
+            }
+            expected = value;
+        }
+        return expected;
+    }
+
+    private Map<String, TraceServiceStatsDto> validatedServiceStats(List<Map<String, Object>> rows,
+                                                                     Long spanCount,
+                                                                     Long errorCount) {
+        if (spanCount == null || spanCount <= 0 || errorCount == null || errorCount > spanCount) {
+            return null;
+        }
+        Map<String, TraceServiceStatsDto> stats = new LinkedHashMap<>();
+        long totalSpans = 0L;
+        long totalErrors = 0L;
+        try {
+            for (Map<String, Object> row : rows) {
+                String service = readText(row, "stats_service_name");
+                Long serviceSpanCount = readOptionalNonNegativeLong(
+                        row, "service_span_count", "serviceSpanCount");
+                Long serviceErrorCount = readOptionalNonNegativeLong(
+                        row, "service_error_span_count", "serviceErrorSpanCount");
+                if (!StringUtils.hasText(service) || serviceSpanCount == null || serviceSpanCount <= 0
+                        || serviceErrorCount == null || serviceErrorCount > serviceSpanCount
+                        || stats.putIfAbsent(service, new TraceServiceStatsDto(
+                                serviceSpanCount, serviceErrorCount)) != null) {
+                    return null;
+                }
+                totalSpans = Math.addExact(totalSpans, serviceSpanCount);
+                totalErrors = Math.addExact(totalErrors, serviceErrorCount);
+            }
+        } catch (ArithmeticException ignored) {
+            return null;
+        }
+        if (totalSpans != spanCount || totalErrors != errorCount) {
+            return null;
+        }
+        return Collections.unmodifiableMap(stats);
+    }
+
+    private Long readOptionalNonNegativeLong(Map<String, Object> row, String... keys) {
+        Long value = readLongValue(row, keys);
+        return value == null || value < 0 ? null : value;
     }
 
     private TraceDetailDto toTraceDetail(TraceAggregate aggregate) {
@@ -1885,8 +1995,8 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
     }
 
     private TraceSpanNodeDto toSpanNode(Map<String, Object> row) {
-        Map<String, String> resourceAttributes = parseAttributes(row.get("resource_attributes"), "resource_attributes.", row);
-        Map<String, String> spanAttributes = parseAttributes(row.get("span_attributes"), "span_attributes.", row);
+        Map<String, String> resourceAttributes = parseAttributes("resource_attributes.", row);
+        Map<String, String> spanAttributes = parseAttributes("span_attributes.", row);
         String status = normalizeStatus(readText(row, "span_status_code"));
         TraceSpanNodeDto span = new TraceSpanNodeDto();
         span.setTraceId(readText(row, "trace_id"));
@@ -1922,13 +2032,40 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
                 continue;
             }
             events.add(new TraceSpanEventDto(
-                    readLongValue(item, "time_unix_nano", "timeUnixNano"),
+                    readNonNegativeDecimalString(item, "time_unix_nano", "timeUnixNano"),
                     defaultText(readTextValue(item, "name"), readTextValue(item, "event_name")),
                     readObjectMap(item, "attributes"),
                     readNonNegativeIntValue(item, "dropped_attributes_count", "droppedAttributesCount")
             ));
         }
         return events;
+    }
+
+    private String readNonNegativeDecimalString(Map<String, Object> row, String... keys) {
+        Object value = null;
+        for (String key : keys) {
+            if (row.containsKey(key)) {
+                value = row.get(key);
+                break;
+            }
+        }
+        if (value instanceof BigInteger integer) {
+            return integer.signum() >= 0 ? integer.toString() : null;
+        }
+        if (value instanceof BigDecimal decimal) {
+            try {
+                BigInteger integer = decimal.toBigIntegerExact();
+                return integer.signum() >= 0 ? integer.toString() : null;
+            } catch (ArithmeticException ignored) {
+                return null;
+            }
+        }
+        if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long) {
+            long number = ((Number) value).longValue();
+            return number >= 0 ? Long.toString(number) : null;
+        }
+        String text = value instanceof String string ? string.trim() : null;
+        return text != null && NON_NEGATIVE_DECIMAL_PATTERN.matcher(text).matches() ? text : null;
     }
 
     private List<TraceSpanLinkDto> parseSpanLinks(Object rawValue) {
@@ -2054,19 +2191,8 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
         return value == null ? null : Math.max(0, value);
     }
 
-    private Map<String, String> parseAttributes(Object rawValue, String prefix, Map<String, Object> row) {
+    private Map<String, String> parseAttributes(String prefix, Map<String, Object> row) {
         Map<String, String> values = new LinkedHashMap<>();
-        if (rawValue instanceof String rawText && StringUtils.hasText(rawText)) {
-            try {
-                Object parsed = JSON_MAPPER.readValue(rawText, new TypeReference<>() {
-                });
-                collectTraceAttributes(values, parsed);
-            } catch (Exception ignored) {
-                // Keep fallback scan below.
-            }
-        } else {
-            collectTraceAttributes(values, rawValue);
-        }
         row.forEach((key, value) -> {
             String normalizedKey = trimText(key);
             if (normalizedKey == null || !normalizedKey.startsWith(prefix)) {
@@ -2079,47 +2205,6 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
             }
         });
         return values;
-    }
-
-    private void collectTraceAttributes(Map<String, String> values, Object rawValue) {
-        if (rawValue instanceof Map<?, ?> rawMap) {
-            Object key = rawMap.get("key");
-            if (key != null && rawMap.containsKey("value")) {
-                putTraceAttribute(values, key, rawMap.get("value"));
-                return;
-            }
-            rawMap.forEach((attributeKey, attributeValue) -> putTraceAttribute(values, attributeKey, attributeValue));
-            return;
-        }
-        if (rawValue instanceof Iterable<?> items) {
-            items.forEach(item -> collectTraceAttributes(values, item));
-        }
-    }
-
-    private void putTraceAttribute(Map<String, String> values, Object key, Object value) {
-        String normalizedKey = trimText(Objects.toString(key, null));
-        String normalizedValue = traceAttributeValue(value);
-        if (normalizedKey != null && normalizedValue != null) {
-            values.put(normalizedKey, normalizedValue);
-        }
-    }
-
-    private String traceAttributeValue(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Map<?, ?> rawMap) {
-            for (String key : List.of("stringValue", "string_value", "intValue", "int_value",
-                    "doubleValue", "double_value", "boolValue", "bool_value")) {
-                if (rawMap.containsKey(key)) {
-                    return traceAttributeValue(rawMap.get(key));
-                }
-            }
-            if (rawMap.containsKey("value")) {
-                return traceAttributeValue(rawMap.get("value"));
-            }
-        }
-        return trimText(Objects.toString(value, null));
     }
 
     private String resolveEntityTitle(ObservedEntityContext entityContext) {
@@ -2344,6 +2429,7 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
         private String status;
         private Long startTime;
         private int errorSpanCount;
+        private int rootSpanCount;
         private Map<String, String> resourceAttributes = Collections.emptyMap();
         private final List<TraceSpanNodeDto> spans = new ArrayList<>();
 
@@ -2370,6 +2456,7 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
             }
             TraceSpanNodeDto currentRoot = isRoot(span) ? span : null;
             if (currentRoot != null) {
+                this.rootSpanCount++;
                 this.rootSpanId = currentRoot.getSpanId();
                 this.rootSpanName = currentRoot.getSpanName();
                 this.durationNanos = currentRoot.getDurationNanos();
@@ -2379,39 +2466,28 @@ public class EntityTraceQueryServiceImpl implements EntityTraceQueryService {
 
         private TraceAggregate normalize() {
             this.spans.sort(Comparator.comparing(TraceSpanNodeDto::getStartTime, Comparator.nullsLast(Comparator.naturalOrder())));
-            if (!StringUtils.hasText(this.rootSpanId) && !this.spans.isEmpty()) {
-                TraceSpanNodeDto first = this.spans.getFirst();
-                this.rootSpanId = first.getSpanId();
-                this.rootSpanName = first.getSpanName();
-                this.durationNanos = first.getDurationNanos();
-                this.resourceAttributes = first.getResourceAttributes();
-            }
-            TraceSpanNodeDto rootSpan = findRootSpan();
+            TraceSpanNodeDto rootSpan = this.rootSpanCount == 1 ? findRootSpan() : null;
             if (rootSpan != null) {
                 this.serviceName = preferText(rootSpan.getServiceName(),
                         rootSpan.getResourceAttributes().get("service.name"),
                         this.serviceName);
                 this.serviceNamespace = preferText(rootSpan.getResourceAttributes().get("service.namespace"),
                         this.serviceNamespace);
+                this.startTime = rootSpan.getStartTime();
                 if (!CollectionUtils.isEmpty(rootSpan.getResourceAttributes())) {
                     this.resourceAttributes = rootSpan.getResourceAttributes();
                 }
-            }
-            if (!StringUtils.hasText(this.serviceName) && !this.spans.isEmpty()) {
-                this.serviceName = this.spans.getFirst().getServiceName();
-            }
-            if (!StringUtils.hasText(this.serviceNamespace) && !CollectionUtils.isEmpty(this.resourceAttributes)) {
-                this.serviceNamespace = this.resourceAttributes.get("service.namespace");
+            } else {
+                this.rootSpanId = null;
+                this.serviceName = null;
+                this.serviceNamespace = null;
+                this.rootSpanName = null;
+                this.durationNanos = null;
+                this.startTime = null;
+                this.resourceAttributes = Collections.emptyMap();
             }
             if (!StringUtils.hasText(this.status)) {
                 this.status = "unknown";
-            }
-            if (this.durationNanos == null) {
-                this.durationNanos = this.spans.stream()
-                        .map(TraceSpanNodeDto::getDurationNanos)
-                        .filter(Objects::nonNull)
-                        .max(Long::compareTo)
-                        .orElse(null);
             }
             return this;
         }

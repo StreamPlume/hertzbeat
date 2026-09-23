@@ -17,7 +17,7 @@
 
 import { App } from 'antd';
 import { useEffect, useRef, useState } from 'react';
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { alertSilenceFailureKind, alertSilenceWriteOutcome } from '../model/alert-silence-model';
@@ -46,9 +46,9 @@ type RetainedReceipt = {
 };
 type OperationOwner = number;
 type GateRuntime = {
-  mounted: RefObject<boolean>;
-  owner: RefObject<OperationOwner | null>;
-  receipt: RefObject<RetainedReceipt | null>;
+  mounted: MutableRefObject<boolean>;
+  owner: MutableRefObject<OperationOwner | null>;
+  receipt: MutableRefObject<RetainedReceipt | null>;
   setActive: Dispatch<SetStateAction<boolean>>;
   setProjectionFailure: Dispatch<SetStateAction<AlertSilenceProjectionFailure | null>>;
   setRecovery: Dispatch<SetStateAction<AlertSilenceRecovery | null>>;
@@ -200,14 +200,14 @@ function recoveryFor(receipt: RetainedReceipt): AlertSilenceRecovery {
   };
 }
 
-function owns(commandOwner: number, owner: RefObject<number | null>, mounted: RefObject<boolean>) {
+function owns(commandOwner: number, owner: MutableRefObject<number | null>, mounted: MutableRefObject<boolean>) {
   return mounted.current && owner.current === commandOwner;
 }
 
 function retire(
   commandOwner: number,
-  owner: RefObject<number | null>,
-  mounted: RefObject<boolean>,
+  owner: MutableRefObject<number | null>,
+  mounted: MutableRefObject<boolean>,
   setActive: Dispatch<SetStateAction<boolean>>
 ) {
   if (owner.current !== commandOwner) return;

@@ -23,6 +23,7 @@ import {
   exploreHandoffState,
   exploreQueryContext,
   exploreUsesExactWindow,
+  logTrendZoomPatch,
   mergeExploreContextChanges,
   mergeExploreQuery,
   parseExploreQuery,
@@ -58,6 +59,23 @@ describe('explore query state', () => {
       '/explore?signal=logs&timeRange=last-30m&start=1723454400000&end=1723456200000' +
         '&timeZone=Asia%2FShanghai&entityId=7&monitorId=42&serviceName=checkout'
     );
+  });
+
+  it('accepts an exact entity investigation without inventing monitor or ingestion identity', () => {
+    const query = parseExploreQuery(
+      new URLSearchParams(
+        'signal=metrics&entityId=677625915133184&start=1750000000000&end=1750000060000' + '&timeZone=Asia%2FShanghai'
+      )
+    );
+
+    expect(exploreHandoffState(query)).toBe('scoped');
+    expect(exploreUsesExactWindow(query)).toBe(true);
+    expect(buildExplorePath(query)).toBe(
+      '/explore?signal=metrics&timeRange=last-30m&start=1750000000000&end=1750000060000' +
+        '&timeZone=Asia%2FShanghai&entityId=677625915133184'
+    );
+    expect(query.monitorId).toBeUndefined();
+    expect(query.serviceName).toBeUndefined();
   });
 
   it('keeps only supported values and trims empty context', () => {
@@ -679,5 +697,71 @@ describe('explore query state', () => {
 
   it('uses bounded time presets', () => {
     expect(timeRangeMilliseconds('last-24h')).toBe(86_400_000);
+  });
+
+  it('turns a bounded Log trend zoom into an exact query without dropping active filters', () => {
+    const query = parseExploreQuery(
+      new URLSearchParams(
+        'signal=logs&timeRange=last-30m&windowMode=preset&page=3&logRecordUid=record-1' +
+          '&serviceName=checkout&serviceNamespace=commerce&environment=prod&query=timeout&severityText=warn' +
+          '&resourceFilter=cloud.region%3Dus-east&attributeFilter=http.status_code%3D500' +
+          '&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef'
+      )
+    );
+    expect(query.signal).toBe('logs');
+    if (query.signal !== 'logs') throw new Error('Expected a Log Explore query');
+    const patch = logTrendZoomPatch(
+      query,
+      { from: 1_750_000_000_000, to: 1_750_003_600_000 },
+      { from: 1_750_000_600_000, to: 1_750_001_200_000 }
+    );
+
+    expect(patch).toEqual({
+      start: 1_750_000_600_000,
+      end: 1_750_001_200_000,
+      windowMode: undefined,
+      pageIndex: undefined,
+      logRecordUid: undefined,
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef'
+    });
+    expect(mergeExploreQuery(query, patch!)).toMatchObject({
+      signal: 'logs',
+      serviceName: 'checkout',
+      serviceNamespace: 'commerce',
+      environment: 'prod',
+      query: 'timeout',
+      severityText: 'warn',
+      resourceFilter: 'cloud.region=us-east',
+      attributeFilter: 'http.status_code=500',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      start: 1_750_000_600_000,
+      end: 1_750_001_200_000,
+      windowMode: undefined,
+      pageIndex: undefined,
+      logRecordUid: undefined
+    });
+  });
+
+  it('rejects an unchanged Log trend window', () => {
+    const window = { from: 1_750_000_000_000, to: 1_750_003_600_000 };
+    expect(logTrendZoomPatch({ signal: 'logs', timeRange: 'last-30m' }, window, window)).toBeUndefined();
+  });
+
+  it.each([
+    ['unsafe start', { from: Number.MAX_SAFE_INTEGER + 1, to: Number.MAX_SAFE_INTEGER + 2 }],
+    ['non-positive start', { from: 0, to: 1_750_000_600_000 }],
+    ['reversed window', { from: 1_750_000_600_000, to: 1_750_000_000_000 }],
+    ['outside evidence', { from: 1_749_999_999_999, to: 1_750_000_600_000 }],
+    ['over 24 hours', { from: 1_750_000_000_000, to: 1_750_086_400_001 }]
+  ] as const)('rejects a %s Log trend zoom', (_name, requested) => {
+    expect(
+      logTrendZoomPatch(
+        { signal: 'logs', timeRange: 'last-30m' },
+        { from: 1_750_000_000_000, to: 1_750_100_000_000 },
+        requested
+      )
+    ).toBeUndefined();
   });
 });

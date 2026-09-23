@@ -29,6 +29,7 @@ import type {
 } from './monitor-contract';
 import type { MonitorHistorySeries } from './monitor-history-model';
 import type { MonitorMetricLayoutActions, MonitorMetricLayoutState } from './monitor-metric-layout-model';
+import type { MonitorInvestigationViewState } from './monitor-investigation-model';
 
 export { monitorHistoryMetrics, monitorHistorySeries } from './monitor-history-model';
 
@@ -153,6 +154,7 @@ export type MonitorMetricWorkbenchController = {
     historyAvailability: MonitorHistoryAvailability;
     historyCharts: MonitorHistoryChart[];
     selectedHistoryChart?: MonitorHistoryChart | undefined;
+    investigation: MonitorInvestigationViewState;
     investigationSignals: SignalKind[];
     hasMoreHistoryCharts: boolean;
     realtime: MonitorMetricRowsEvidence<ReturnType<typeof monitorRealtimeRows>[number]>;

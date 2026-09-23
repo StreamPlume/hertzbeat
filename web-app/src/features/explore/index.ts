@@ -17,3 +17,22 @@
 
 export { ExplorePage } from './pages/explore-page';
 export { buildExplorePath } from './model/explore-url-model';
+export {
+  InvestigationAvailability,
+  InvestigationBlockState,
+  InvestigationSection
+} from './components/explore-investigation-view-primitives';
+export { investigationPrimitiveMessages } from './components/explore-investigation-messages';
+export { InvestigationMetricPanels } from './components/explore-investigation-metrics';
+export {
+  createInvestigationLogResult,
+  createInvestigationMetricResults
+} from './model/explore-investigation-perses-model';
+export {
+  investigationLogRecordSchema,
+  investigationTraceIdSchema
+} from './api/explore-investigation-schema-primitives';
+export {
+  investigationDurationNanoToMillis,
+  investigationUnixNanoToEpochMillis
+} from './model/explore-investigation-model';

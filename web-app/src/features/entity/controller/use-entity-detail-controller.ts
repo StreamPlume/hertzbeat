@@ -14,13 +14,7 @@ import {
   loadEntityIdentity
 } from '../api/entity-api';
 import type { EntityNextActionType, EntityRecord } from '../model/entity-contract';
-import {
-  buildEntityExplorePath,
-  buildEntityNextActionPath,
-  buildEntityTopologyPath,
-  entityNextActionRequiresWrite,
-  type EntityExploreSignal
-} from '../model/entity-operational-navigation';
+import { buildEntityNextActionPath, entityNextActionRequiresWrite } from '../model/entity-operational-navigation';
 import {
   buildEntityEditRoute,
   buildEntityDefinitionRoute,
@@ -30,8 +24,10 @@ import {
   type EntityNoiseControlType
 } from '../model/entity-view-model';
 import { entityQueryKeys } from './entity-query-keys';
+import { buildEntityInspectionActions } from './entity-detail-inspection-actions';
 import { useEntityCapabilities } from './use-entity-capabilities';
 import { useEntityMonitorsController } from './use-entity-monitors-controller';
+import { useEntitySignalController } from './use-entity-signal-controller';
 
 export function useEntityDetailController() {
   const navigate = useNavigate();
@@ -47,19 +43,28 @@ export function useEntityDetailController() {
   });
   const evidence = resolveDetail(id, result.isPending, result.error, result.data);
   const entity = entityFromEvidence(evidence);
+  const signals = useEntitySignalController(signalSourceFromEvidence(evidence));
   const deletion = useEntityDeletion(entity, params.get('returnTo'), capabilities.canDelete);
-  const inspectionActions = buildEntityInspectionActions(evidence, params.get('returnTo'), navigate);
+  const inspectionActions = buildEntityInspectionActions(evidence, signals.state, params.get('returnTo'), path => {
+    void navigate(path);
+  });
   return {
     state: {
       evidence,
-      refreshing: result.isFetching && !result.isPending,
+      refreshing:
+        (result.isFetching && !result.isPending) ||
+        (signals.state?.kind === 'ready' && signals.state.refreshing === true),
       canWrite: capabilities.canWrite,
       canDelete: capabilities.canDelete,
       monitors: monitors.state,
+      signals: signals.state,
       ...deletion.state
     },
     actions: {
-      refresh: () => void result.refetch(),
+      refresh: () => {
+        void result.refetch();
+        signals.refresh();
+      },
       back: () => void navigate(safeEntityReturnTo(params.get('returnTo'))),
       edit: () => {
         if (capabilities.canWrite && entity) void navigate(buildEntityEditRoute(entity.id, params.get('returnTo')));
@@ -81,21 +86,6 @@ export function useEntityDetailController() {
       },
       ...monitors.actions,
       remove: deletion.remove
-    }
-  };
-}
-
-function buildEntityInspectionActions(
-  evidence: EntityDetailEvidence,
-  returnTo: string | null,
-  navigate: ReturnType<typeof useNavigate>
-) {
-  return {
-    explore: (signal: EntityExploreSignal) => {
-      if (evidence.kind === 'ready') void navigate(buildEntityExplorePath(evidence.detail, signal));
-    },
-    topology: () => {
-      if (evidence.kind === 'ready') void navigate(buildEntityTopologyPath(evidence.detail, returnTo));
     }
   };
 }
@@ -197,6 +187,11 @@ async function loadEntityDetailEvidence(
 
 function entityFromEvidence(evidence: EntityDetailEvidence) {
   if (evidence.kind === 'ready') return evidence.detail.entity;
+  return evidence.kind === 'degraded' ? evidence.entity : undefined;
+}
+
+function signalSourceFromEvidence(evidence: EntityDetailEvidence) {
+  if (evidence.kind === 'ready') return evidence.detail;
   return evidence.kind === 'degraded' ? evidence.entity : undefined;
 }
 

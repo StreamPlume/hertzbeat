@@ -29,7 +29,7 @@ import { defaultMonitorDetailRefreshSeconds } from '../model/monitor-detail-mode
 const api = vi.hoisted(() => ({
   loadFavoriteMetrics: vi.fn(),
   loadHistoryMetric: vi.fn(),
-  loadMonitorInvestigationBinding: vi.fn(),
+  loadMonitorInvestigation: vi.fn(),
   loadMonitorMetricCatalog: vi.fn(),
   loadRealtimeMetric: vi.fn(),
   updateFavoriteMetric: vi.fn()
@@ -65,7 +65,9 @@ describe('useMonitorMetricWorkbenchController', () => {
     vi.clearAllMocks();
     runtimeStatus.useRuntimeStatusController.mockReturnValue(runtimeStatusEvidence('available'));
     api.loadMonitorMetricCatalog.mockResolvedValue(catalog());
-    api.loadMonitorInvestigationBinding.mockResolvedValue(undefined);
+    api.loadMonitorInvestigation.mockImplementation((id: number, window: { from: number; to: number }) =>
+      Promise.resolve(investigationSnapshot(id, window))
+    );
     api.loadFavoriteMetrics.mockResolvedValue([]);
     api.loadRealtimeMetric.mockResolvedValue({ fields: [], valueRows: [] });
     api.loadHistoryMetric.mockResolvedValue({ values: {} });
@@ -120,15 +122,19 @@ describe('useMonitorMetricWorkbenchController', () => {
 
   it('opens only an advertised signal with the selected exact history window and canonical identity', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
-    api.loadMonitorInvestigationBinding.mockResolvedValue({
-      monitorId: 7,
-      entityId: 17,
-      entityType: 'service',
-      serviceName: 'checkout',
-      serviceNamespace: 'commerce',
-      environment: 'production',
-      signals: ['metrics', 'logs']
-    });
+    api.loadMonitorInvestigation.mockImplementation((id: number, window: { from: number; to: number }) =>
+      Promise.resolve(
+        investigationSnapshot(id, window, {
+          monitorId: 7,
+          entityId: 17,
+          entityType: 'service',
+          serviceName: 'checkout',
+          serviceNamespace: 'commerce',
+          environment: 'production',
+          signals: ['metrics', 'logs']
+        })
+      )
+    );
     try {
       const view = renderController(monitor(), [], '/monitors/7?metric=summary.value&history=1h');
       await waitFor(() =>
@@ -149,7 +155,11 @@ describe('useMonitorMetricWorkbenchController', () => {
 
       act(() => view.result.current.controller.actions.openInvestigationSignal('traces'));
       expect(view.result.current.location.search).toBe(`?${params.toString()}`);
-      expect(api.loadMonitorInvestigationBinding).toHaveBeenCalledWith(7, expect.any(AbortSignal));
+      expect(api.loadMonitorInvestigation).toHaveBeenCalledWith(
+        7,
+        { from: 1_800_000_000_000 - 60 * 60_000, to: 1_800_000_000_000 },
+        expect.any(AbortSignal)
+      );
     } finally {
       now.mockRestore();
     }
@@ -158,10 +168,52 @@ describe('useMonitorMetricWorkbenchController', () => {
   it('keeps the cross-signal handoff absent without an authoritative binding', async () => {
     const view = renderController(monitor(), [], '/monitors/7');
 
-    await waitFor(() => expect(api.loadMonitorInvestigationBinding).toHaveBeenCalledOnce());
+    await waitFor(() => expect(api.loadMonitorInvestigation).toHaveBeenCalledOnce());
+    await waitFor(() => expect(view.result.current.controller.state.investigation.kind).toBe('ready'));
     expect(view.result.current.controller.state.investigationSignals).toEqual([]);
+    expect(view.result.current.controller.state.investigation).toMatchObject({
+      kind: 'ready',
+      snapshot: { binding: { state: 'empty', identity: null } }
+    });
     act(() => view.result.current.controller.actions.openInvestigationSignal('logs'));
     expect(view.result.current.location.pathname).toBe('/monitors/7');
+  });
+
+  it('refreshes the investigation with its original frozen window', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    try {
+      const view = renderController(monitor(), [], '/monitors/7?history=1h');
+      await waitFor(() => expect(api.loadMonitorInvestigation).toHaveBeenCalledOnce());
+      const initialWindow = { from: 1_800_000_000_000 - 60 * 60_000, to: 1_800_000_000_000 };
+      expect(api.loadMonitorInvestigation).toHaveBeenLastCalledWith(7, initialWindow, expect.any(AbortSignal));
+
+      now.mockReturnValue(1_800_003_600_000);
+      act(() => view.result.current.controller.actions.refresh());
+
+      await waitFor(() => expect(api.loadMonitorInvestigation).toHaveBeenCalledTimes(2));
+      expect(api.loadMonitorInvestigation).toHaveBeenLastCalledWith(7, initialWindow, expect.any(AbortSignal));
+      expect(view.result.current.controller.state.investigation).toMatchObject({
+        kind: 'ready',
+        window: { ...initialWindow, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('does not present retained investigation data as ready after a failed refresh', async () => {
+    api.loadMonitorInvestigation
+      .mockImplementationOnce((id: number, window: { from: number; to: number }) =>
+        Promise.resolve(investigationSnapshot(id, window))
+      )
+      .mockRejectedValueOnce(new ApiMessageError('offline', { status: 503 }));
+    const view = renderController(monitor(), [], '/monitors/7?history=1h');
+    await waitFor(() => expect(view.result.current.controller.state.investigation.kind).toBe('ready'));
+
+    act(() => view.result.current.controller.actions.refresh());
+
+    await waitFor(() => expect(view.result.current.controller.state.investigation.kind).toBe('unavailable'));
+    expect(view.result.current.controller.state.investigationSignals).toEqual([]);
   });
 
   it('keeps embedded realtime groups available when the history catalog is unavailable', async () => {
@@ -734,6 +786,34 @@ function numericCatalog(count: number) {
       visible: true,
       fields: [{ type: 0, field: 'value', unit: null, label: false }]
     }))
+  };
+}
+
+function investigationSnapshot(
+  monitorId: number,
+  window: { from: number; to: number },
+  identity?: {
+    monitorId: number;
+    entityId: number;
+    entityType: 'service';
+    serviceName: string;
+    serviceNamespace: string | null;
+    environment: string | null;
+    signals: ('metrics' | 'logs' | 'traces')[];
+  }
+) {
+  return {
+    monitorId,
+    window: { start: window.from, end: window.to },
+    collection: { state: 'empty' as const, source: 'greptime_collection_events' as const, event: null },
+    alerts: {
+      state: 'empty' as const,
+      source: 'current_alerts' as const,
+      scope: 'current' as const,
+      activeCount: 0 as const,
+      previews: []
+    },
+    binding: identity ? { state: 'ready' as const, identity } : { state: 'empty' as const, identity: null }
   };
 }
 

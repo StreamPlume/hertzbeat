@@ -15,6 +15,9 @@ const api = vi.hoisted(() => ({
 }));
 const modal = vi.hoisted(() => ({ confirm: vi.fn() }));
 const capability = vi.hoisted(() => ({ useEntityCapabilities: vi.fn() }));
+const signalController = vi.hoisted(() => ({
+  useEntitySignalController: vi.fn(() => ({ state: undefined, refresh: vi.fn() }))
+}));
 vi.mock('../api/entity-api', async importOriginal => ({
   ...(await importOriginal<typeof import('../api/entity-api')>()),
   ...api
@@ -29,6 +32,7 @@ vi.mock('antd', async importOriginal => ({
   App: { useApp: () => ({ modal }) }
 }));
 vi.mock('./use-entity-capabilities', () => capability);
+vi.mock('./use-entity-signal-controller', () => signalController);
 
 import { useEntityDetailController } from './use-entity-detail-controller';
 
@@ -266,6 +270,11 @@ describe('useEntityDetailController deletion', () => {
       unavailable: 'telemetry'
     });
     expect(api.loadEntityIdentity).toHaveBeenCalledWith(7, expect.any(AbortSignal));
+    expect(signalController.useEntitySignalController).toHaveBeenLastCalledWith({
+      ...detail.entity,
+      environment: 'prod',
+      owner: 'payments-sre'
+    });
     expect(JSON.stringify(routed.current().state)).not.toContain('private telemetry');
   });
 

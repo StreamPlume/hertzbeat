@@ -139,6 +139,8 @@ public class AgentTraceToolService {
         TraceListItemDto summary = new TraceListItemDto(trace.getTraceId(), trace.getRootSpanId(),
                 trace.getServiceName(), trace.getServiceNamespace(), trace.getRootSpanName(),
                 trace.getDurationNanos(), trace.getStatus(), trace.getStartTime(), trace.getErrorSpanCount(),
+                trace.getSpans() == null ? null : (long) trace.getSpans().size(),
+                null,
                 trace.getResourceAttributes());
         return traceRow(summary);
     }

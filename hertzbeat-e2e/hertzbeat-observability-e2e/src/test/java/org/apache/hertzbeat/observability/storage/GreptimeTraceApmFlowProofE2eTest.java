@@ -22,6 +22,17 @@ import static org.awaitility.Awaitility.await;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ByteString;
+import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
+import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceResponse;
+import io.opentelemetry.proto.common.v1.AnyValue;
+import io.opentelemetry.proto.common.v1.KeyValue;
+import io.opentelemetry.proto.resource.v1.Resource;
+import io.opentelemetry.proto.trace.v1.ResourceSpans;
+import io.opentelemetry.proto.trace.v1.ScopeSpans;
+import io.opentelemetry.proto.trace.v1.Span;
+import io.opentelemetry.proto.trace.v1.Status;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -31,7 +42,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
@@ -41,24 +54,31 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Proves Greptime Flow can derive HertzBeat APM RED alert data from native trace rows.
+ * Proves Greptime's native OTLP trace pipeline writes the production HertzBeat trace schema and RED Flow.
  */
 @Testcontainers
 class GreptimeTraceApmFlowProofE2eTest {
 
-    private static final String GREPTIME_IMAGE = "greptime/greptimedb:latest";
+    private static final String GREPTIME_IMAGE = "greptime/greptimedb:v1.1.4";
     private static final int GREPTIME_HTTP_PORT = 4000;
     private static final int GREPTIME_GRPC_PORT = 4001;
     private static final String TRACE_TABLE = "hzb_traces";
-    private static final String APM_FLOW = "hertzbeat_apm_red_1m_flow";
     private static final String APM_TABLE = "hertzbeat_apm_red_1m";
     private static final String SERVICE_NAME = "checkout";
     private static final String OPERATION = "GET /checkout";
-    private static final String SPAN_KIND = "SPAN_KIND_SERVER";
+    private static final String ROLLUP_SPAN_KIND = "SERVER";
     private static final String WORKSPACE_ID = "workspace-trace-flow-proof";
     private static final String ENTITY_ID = "entity-trace-flow-proof";
+    private static final String ENTITY_TYPE = "service";
     private static final String ENVIRONMENT = "prod";
     private static final String SERVICE_NAMESPACE = "payments";
+    private static final String SERVICE_INSTANCE_ID = "checkout-proof-7d9";
+    private static final String COLLECTOR_ID = "collector-trace-flow-proof";
+    private static final String RESOURCE_LONG_TAIL_VALUE = "2026.08-proof";
+    private static final String SPAN_LONG_TAIL_VALUE = "postgresql";
+    private static final String TRACE_ID = "0123456789abcdef0123456789abcdef";
+    private static final String SPAN_ID = "0123456789abcdef";
+    private static final long DURATION_NANOS = 1_200_000_000L;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Container
@@ -75,32 +95,66 @@ class GreptimeTraceApmFlowProofE2eTest {
     private final long windowNanos = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli() * 1_000_000L;
 
     @Test
-    void greptimeFlowCanDeriveApmRedRowsFromNativeTraceRows() throws Exception {
-        executeSql(traceTableDdl());
-        executeSql(apmSinkDdl());
-        executeSql(apmFlowSql());
-        insertTraceRows();
+    void greptimeOtlpPipelinePopulatesFlattenedTraceColumnsAndRedFlow() throws Exception {
+        executeSqlScript("greptime/tables/hzb_traces.sql");
+        executeSqlScript("greptime/flows/hertzbeat_apm_red_1m.sql");
+        ExportTraceServiceResponse response = exportTrace();
+
+        assertThat(response.hasPartialSuccess()).isFalse();
+
+        await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofSeconds(1)).untilAsserted(() -> {
+            Map<String, Object> row = querySingleRow("SELECT service_name, trace_id, span_id, span_kind, "
+                    + "span_status_code, duration_nano, "
+                    + "\"resource_attributes.hertzbeat.workspace_id\" AS workspace_id, "
+                    + "\"resource_attributes.hertzbeat.entity_id\" AS entity_id, "
+                    + "\"resource_attributes.hertzbeat.entity_type\" AS entity_type, "
+                    + "\"resource_attributes.service.namespace\" AS service_namespace, "
+                    + "\"resource_attributes.service.instance.id\" AS service_instance_id, "
+                    + "\"resource_attributes.deployment.environment.name\" AS deployment_environment, "
+                    + "\"resource_attributes.hertzbeat.collector.id\" AS collector_id, "
+                    + "\"resource_attributes.service.version\" AS resource_long_tail, "
+                    + "\"span_attributes.db.system\" AS span_long_tail "
+                    + "FROM " + TRACE_TABLE + " WHERE trace_id = '" + TRACE_ID + "'");
+
+            assertThat(row)
+                    .containsEntry("service_name", SERVICE_NAME)
+                    .containsEntry("trace_id", TRACE_ID)
+                    .containsEntry("span_id", SPAN_ID)
+                    .containsEntry("span_kind", "SPAN_KIND_SERVER")
+                    .containsEntry("span_status_code", "STATUS_CODE_ERROR")
+                    .containsEntry("workspace_id", WORKSPACE_ID)
+                    .containsEntry("entity_id", ENTITY_ID)
+                    .containsEntry("entity_type", ENTITY_TYPE)
+                    .containsEntry("service_namespace", SERVICE_NAMESPACE)
+                    .containsEntry("service_instance_id", SERVICE_INSTANCE_ID)
+                    .containsEntry("deployment_environment", ENVIRONMENT)
+                    .containsEntry("collector_id", COLLECTOR_ID)
+                    .containsEntry("resource_long_tail", RESOURCE_LONG_TAIL_VALUE)
+                    .containsEntry("span_long_tail", SPAN_LONG_TAIL_VALUE);
+            assertThat(number(row.get("duration_nano"))).isEqualTo(DURATION_NANOS);
+        });
 
         await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofSeconds(1)).untilAsserted(() -> {
             Map<String, Object> row = querySingleRow("SELECT service_name, operation, span_kind, workspace_id, "
-                    + "entity_id, deployment_environment, service_namespace, calls_total, error_total, "
+                    + "entity_id, entity_type, deployment_environment, service_namespace, calls_total, error_total, "
                     + "duration_sum_nano, duration_count FROM " + APM_TABLE
                     + " WHERE service_name = '" + SERVICE_NAME + "'"
                     + " AND operation = '" + OPERATION + "'"
-                    + " AND span_kind = '" + SPAN_KIND + "'");
+                    + " AND span_kind = '" + ROLLUP_SPAN_KIND + "'");
 
             assertThat(row)
                     .containsEntry("service_name", SERVICE_NAME)
                     .containsEntry("operation", OPERATION)
-                    .containsEntry("span_kind", SPAN_KIND)
+                    .containsEntry("span_kind", ROLLUP_SPAN_KIND)
                     .containsEntry("workspace_id", WORKSPACE_ID)
                     .containsEntry("entity_id", ENTITY_ID)
+                    .containsEntry("entity_type", ENTITY_TYPE)
                     .containsEntry("deployment_environment", ENVIRONMENT)
                     .containsEntry("service_namespace", SERVICE_NAMESPACE);
-            assertThat(number(row.get("calls_total"))).isEqualTo(2L);
+            assertThat(number(row.get("calls_total"))).isEqualTo(1L);
             assertThat(number(row.get("error_total"))).isEqualTo(1L);
-            assertThat(number(row.get("duration_sum_nano"))).isEqualTo(1_300_000_000L);
-            assertThat(number(row.get("duration_count"))).isEqualTo(2L);
+            assertThat(number(row.get("duration_sum_nano"))).isEqualTo(DURATION_NANOS);
+            assertThat(number(row.get("duration_count"))).isEqualTo(1L);
 
             Map<String, Object> sketchRow = querySingleRow("SELECT "
                     + "uddsketch_calc(0.95, uddsketch_merge(128, 0.01, duration_sketch)) AS p95_nano "
@@ -112,116 +166,65 @@ class GreptimeTraceApmFlowProofE2eTest {
         });
     }
 
-    private String traceTableDdl() {
-        return "CREATE TABLE IF NOT EXISTS " + TRACE_TABLE + " ("
-                + "\"timestamp\" TIMESTAMP(9) TIME INDEX,"
-                + "\"timestamp_end\" TIMESTAMP(9) NULL,"
-                + "\"duration_nano\" BIGINT UNSIGNED NULL,"
-                + "\"trace_id\" STRING NULL SKIPPING INDEX WITH(granularity = '10240', type = 'BLOOM'),"
-                + "\"span_id\" STRING NULL,"
-                + "\"parent_span_id\" STRING NULL,"
-                + "\"span_kind\" STRING NULL,"
-                + "\"span_name\" STRING NULL,"
-                + "\"span_status_code\" STRING NULL,"
-                + "\"span_status_message\" STRING NULL,"
-                + "\"trace_state\" STRING NULL,"
-                + "\"scope_name\" STRING NULL,"
-                + "\"scope_version\" STRING NULL,"
-                + "\"service_name\" STRING NULL,"
-                + "\"resource_attributes\" JSON NULL,"
-                + "\"span_attributes\" JSON NULL,"
-                + "\"span_events\" JSON NULL,"
-                + "\"span_links\" JSON NULL,"
-                + "PRIMARY KEY(\"service_name\"))"
-                + " WITH (append_mode = true, table_data_model = 'greptime_trace_v1')";
+    private ExportTraceServiceResponse exportTrace() throws Exception {
+        Span span = Span.newBuilder()
+                .setTraceId(ByteString.copyFrom(HexFormat.of().parseHex(TRACE_ID)))
+                .setSpanId(ByteString.copyFrom(HexFormat.of().parseHex(SPAN_ID)))
+                .setName(OPERATION)
+                .setKind(Span.SpanKind.SPAN_KIND_SERVER)
+                .setStartTimeUnixNano(windowNanos + 1_000_000_000L)
+                .setEndTimeUnixNano(windowNanos + 1_000_000_000L + DURATION_NANOS)
+                .setStatus(Status.newBuilder().setCode(Status.StatusCode.STATUS_CODE_ERROR))
+                .addAttributes(attribute("db.system", SPAN_LONG_TAIL_VALUE))
+                .build();
+        Resource resource = Resource.newBuilder().addAllAttributes(List.of(
+                attribute("service.name", SERVICE_NAME),
+                attribute("hertzbeat.workspace_id", WORKSPACE_ID),
+                attribute("hertzbeat.entity_id", ENTITY_ID),
+                attribute("hertzbeat.entity_type", ENTITY_TYPE),
+                attribute("service.namespace", SERVICE_NAMESPACE),
+                attribute("service.instance.id", SERVICE_INSTANCE_ID),
+                attribute("deployment.environment.name", ENVIRONMENT),
+                attribute("hertzbeat.collector.id", COLLECTOR_ID),
+                attribute("service.version", RESOURCE_LONG_TAIL_VALUE))).build();
+        ExportTraceServiceRequest request = ExportTraceServiceRequest.newBuilder()
+                .addResourceSpans(ResourceSpans.newBuilder()
+                        .setResource(resource)
+                        .addScopeSpans(ScopeSpans.newBuilder().addSpans(span)))
+                .build();
+
+        HttpResponse<byte[]> response = httpClient.send(HttpRequest.newBuilder()
+                .uri(URI.create(greptimeEndpoint() + "/v1/otlp/v1/traces"))
+                .header("Content-Type", "application/x-protobuf")
+                .header("X-Greptime-DB-Name", "public")
+                .header("X-Greptime-Trace-Table-Name", TRACE_TABLE)
+                .header("X-Greptime-Pipeline-Name", "greptime_trace_v1")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(request.toByteArray()))
+                .build(), HttpResponse.BodyHandlers.ofByteArray());
+
+        assertThat(response.statusCode())
+                .as("OTLP response body: %s", new String(response.body(), StandardCharsets.UTF_8))
+                .isBetween(200, 299);
+        return ExportTraceServiceResponse.parseFrom(response.body());
     }
 
-    private String apmSinkDdl() {
-        return "CREATE TABLE IF NOT EXISTS " + APM_TABLE + " ("
-                + "time_window TIMESTAMP(9) TIME INDEX,"
-                + "service_name STRING,"
-                + "operation STRING,"
-                + "span_kind STRING,"
-                + "workspace_id STRING NULL,"
-                + "entity_id STRING NULL,"
-                + "deployment_environment STRING NULL,"
-                + "service_namespace STRING NULL,"
-                + "calls_total BIGINT,"
-                + "error_total BIGINT,"
-                + "duration_sum_nano BIGINT,"
-                + "duration_count BIGINT,"
-                + "duration_sketch BINARY,"
-                + "PRIMARY KEY(service_name, operation, span_kind, workspace_id, entity_id, "
-                + "deployment_environment, service_namespace))";
+    private KeyValue attribute(String key, String value) {
+        return KeyValue.newBuilder()
+                .setKey(key)
+                .setValue(AnyValue.newBuilder().setStringValue(value))
+                .build();
     }
 
-    private String apmFlowSql() {
-        return "CREATE FLOW IF NOT EXISTS " + APM_FLOW + " "
-                + "SINK TO " + APM_TABLE + " "
-                + "EXPIRE AFTER '6 hours'::INTERVAL "
-                + "AS SELECT "
-                + "date_bin('1 minute'::INTERVAL, \"timestamp\") AS time_window,"
-                + "service_name,"
-                + "span_name AS operation,"
-                + "span_kind,"
-                + "json_get_string(resource_attributes, '$[\"hertzbeat.workspace_id\"]') AS workspace_id,"
-                + "json_get_string(resource_attributes, '$[\"hertzbeat.entity_id\"]') AS entity_id,"
-                + "json_get_string(resource_attributes, '$[\"deployment.environment\"]') AS deployment_environment,"
-                + "json_get_string(resource_attributes, '$[\"service.namespace\"]') AS service_namespace,"
-                + "COUNT(*) AS calls_total,"
-                + "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS error_total,"
-                + "SUM(duration_nano) AS duration_sum_nano,"
-                + "COUNT(duration_nano) AS duration_count,"
-                + "uddsketch_state(128, 0.01, duration_nano) AS duration_sketch "
-                + "FROM " + TRACE_TABLE + " "
-                + "WHERE span_kind IN ('SPAN_KIND_SERVER', 'SERVER', 'SPAN_KIND_CONSUMER', 'CONSUMER') "
-                + "GROUP BY time_window, service_name, operation, span_kind, workspace_id, entity_id, "
-                + "deployment_environment, service_namespace";
-    }
-
-    private void insertTraceRows() throws Exception {
-        executeSql("INSERT INTO " + TRACE_TABLE + " (\"timestamp\", \"timestamp_end\", duration_nano, trace_id, "
-                + "span_id, parent_span_id, span_kind, span_name, span_status_code, span_status_message, "
-                + "trace_state, scope_name, scope_version, service_name, resource_attributes, span_attributes, "
-                + "span_events, span_links) VALUES "
-                + traceRow(windowNanos + 1_000_000_000L, 100_000_000L, "trace-flow-ok-1", "span-flow-ok-1",
-                "STATUS_CODE_OK")
-                + ","
-                + traceRow(windowNanos + 2_000_000_000L, 1_200_000_000L, "trace-flow-error-1",
-                "span-flow-error-1", "STATUS_CODE_ERROR")
-                + ","
-                + traceRow(windowNanos + 3_000_000_000L, 50_000_000L, "trace-flow-client-1",
-                "span-flow-client-1", "STATUS_CODE_ERROR").replace("'" + SPAN_KIND + "'", "'SPAN_KIND_CLIENT'"));
-    }
-
-    private String traceRow(long startNanos, long durationNanos, String traceId, String spanId, String statusCode) {
-        return "("
-                + "to_timestamp_nanos(" + startNanos + "),"
-                + "to_timestamp_nanos(" + (startNanos + durationNanos) + "),"
-                + durationNanos + ","
-                + "'" + traceId + "',"
-                + "'" + spanId + "',"
-                + "'',"
-                + "'" + SPAN_KIND + "',"
-                + "'" + OPERATION + "',"
-                + "'" + statusCode + "',"
-                + "'',"
-                + "'',"
-                + "'io.opentelemetry',"
-                + "'1.0.0',"
-                + "'" + SERVICE_NAME + "',"
-                + "parse_json('" + resourceAttributesJson() + "'),"
-                + "parse_json('{\"http.route\":\"/checkout\"}'),"
-                + "parse_json('[]'),"
-                + "parse_json('[]')"
-                + ")";
-    }
-
-    private String resourceAttributesJson() {
-        return "{\"hertzbeat.workspace_id\":\"" + WORKSPACE_ID
-                + "\",\"hertzbeat.entity_id\":\"" + ENTITY_ID
-                + "\",\"deployment.environment\":\"" + ENVIRONMENT
-                + "\",\"service.namespace\":\"" + SERVICE_NAMESPACE + "\"}";
+    private void executeSqlScript(String resourceName) throws Exception {
+        try (InputStream input = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourceName)) {
+            assertThat(input).as(resourceName).isNotNull();
+            String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            for (String statement : sql.split(";")) {
+                if (!statement.isBlank()) {
+                    executeSql(statement.strip());
+                }
+            }
+        }
     }
 
     private Map<String, Object> querySingleRow(String sql) throws Exception {

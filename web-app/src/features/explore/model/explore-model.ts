@@ -21,7 +21,8 @@ import {
   type ExploreQuery,
   type ExploreQueryPatch,
   type ExploreSignal,
-  type ExploreTimeRange
+  type ExploreTimeRange,
+  type LogExploreQuery
 } from './explore-query';
 
 import type { ExactTimeWindow, QueryContext } from '@/shared/query-context';
@@ -88,12 +89,13 @@ export function mergeManualExploreQuery(
 export function buildCrossSignalPath(
   query: ExploreQuery,
   signal: ExploreSignal,
-  context: { traceId?: string | undefined }
+  context: { traceId?: string | undefined; spanId?: string | undefined }
 ) {
   return buildExplorePath(
     mergeExploreQuery(query, {
       ...signalSelectionPatch(signal),
-      traceId: context.traceId
+      traceId: context.traceId,
+      spanId: context.spanId
     })
   );
 }
@@ -112,6 +114,7 @@ export function signalSelectionPatch(signal: ExploreSignal): ExploreQueryPatch {
     pageIndex: undefined,
     traceId: undefined,
     spanId: undefined,
+    logRecordUid: undefined,
     severityText: undefined,
     resourceFilter: undefined,
     attributeFilter: undefined,
@@ -145,17 +148,53 @@ export function presetTimeRangePatch(query: ExploreQuery, timeRange: ExploreTime
   };
 }
 
+export function logTrendZoomPatch(
+  query: LogExploreQuery,
+  evidenceWindow: ExactTimeWindow,
+  requestedWindow: ExactTimeWindow
+): ExploreQueryPatch | undefined {
+  if (!validTrendZoomWindow(evidenceWindow, requestedWindow)) return undefined;
+  return {
+    start: requestedWindow.from,
+    end: requestedWindow.to,
+    windowMode: undefined,
+    pageIndex: undefined,
+    logRecordUid: undefined,
+    // In historical Logs these identities are active filters, so an exact zoom must preserve them explicitly.
+    traceId: query.traceId,
+    spanId: query.spanId
+  };
+}
+
+function validTrendZoomWindow(evidence: ExactTimeWindow, requested: ExactTimeWindow) {
+  if (![evidence.from, evidence.to, requested.from, requested.to].every(isPositiveSafeInteger)) return false;
+  if (evidence.from >= evidence.to || requested.from >= requested.to) return false;
+  if (requested.from < evidence.from || requested.to > evidence.to) return false;
+  if (requested.to - requested.from > 24 * 60 * 60_000) return false;
+  return requested.from !== evidence.from || requested.to !== evidence.to;
+}
+
+function isPositiveSafeInteger(value: number) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
 function dependentFilterCleanup(query: ExploreQuery, changes: ExploreQueryPatch) {
   const currentTraceId = 'traceId' in query ? query.traceId : undefined;
+  const currentLogRecordUid = query.signal === 'logs' ? query.logRecordUid : undefined;
   const traceChanged = Object.hasOwn(changes, 'traceId') && changes.traceId !== currentTraceId;
+  const selectedLogChanged = Object.hasOwn(changes, 'logRecordUid') && changes.logRecordUid !== currentLogRecordUid;
   const timeChanged = (['timeRange', 'start', 'end'] as const).some(
     field => Object.hasOwn(changes, field) && changes[field] !== query[field]
   );
-  if (!traceChanged && !timeChanged) return changes;
+  if (!traceChanged && !selectedLogChanged && !timeChanged) return changes;
+  return { ...changes, ...selectionCleanup(changes, timeChanged) };
+}
+
+function selectionCleanup(changes: ExploreQueryPatch, timeChanged: boolean): ExploreQueryPatch {
   return {
-    ...changes,
     traceId: timeChanged && !Object.hasOwn(changes, 'traceId') ? undefined : changes.traceId,
     spanId: Object.hasOwn(changes, 'spanId') ? changes.spanId : undefined,
+    logRecordUid: timeChanged && !Object.hasOwn(changes, 'logRecordUid') ? undefined : changes.logRecordUid,
     pageIndex: Object.hasOwn(changes, 'pageIndex') ? changes.pageIndex : undefined
   };
 }

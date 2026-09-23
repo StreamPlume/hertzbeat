@@ -36,12 +36,10 @@ vi.mock('@/core/http/event-stream', () => ({ openBrowserEventStream }));
 import {
   buildLogStreamPath,
   buildSignalApiPath,
-  buildTraceDetailApiPath,
   classifyExploreSignalError,
   loadLogHistoryEvidence,
   loadLogSignal,
   loadMetricSignal,
-  loadTraceDetail,
   loadTraceSignal,
   openLogStream
 } from './explore-api';
@@ -62,13 +60,13 @@ describe('explore API paths', () => {
       instance: 'checkout-7d9',
       endpoint: '/checkout',
       query: 'timeout',
-      traceId: 'trace-1'
+      traceId: '0123456789abcdef0123456789abcdef'
     };
     expect(buildSignalApiPath(base, 1_000_000)).toBe(
-      '/api/logs/list?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&start=100000&end=1000000&pageIndex=0&pageSize=20&search=timeout&traceId=trace-1'
+      '/api/logs/list?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&start=100000&end=1000000&pageIndex=0&pageSize=20&search=timeout&traceId=0123456789abcdef0123456789abcdef'
     );
     expect(buildSignalApiPath({ ...base, signal: 'traces' }, 1_000_000)).toBe(
-      '/api/traces/list?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&start=100000&end=1000000&pageIndex=0&pageSize=20&operationName=timeout&traceId=trace-1'
+      '/api/traces/list?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&start=100000&end=1000000&pageIndex=0&pageSize=20&operationName=timeout&traceId=0123456789abcdef0123456789abcdef'
     );
     expect(buildSignalApiPath({ ...base, signal: 'metrics' }, 1_000_000)).toBe(
       '/api/ingestion/otlp/metrics/console?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&start=100000&end=1000000&query=timeout'
@@ -77,7 +75,7 @@ describe('explore API paths', () => {
       '&query=timeout&operationName=POST+%2Fcheckout'
     );
     expect(buildLogStreamPath(base)).toBe(
-      '/api/logs/sse/subscribe?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&logContent=timeout&traceId=trace-1'
+      '/api/logs/sse/subscribe?serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-7d9&endpoint=%2Fcheckout&logContent=timeout&traceId=0123456789abcdef0123456789abcdef'
     );
   });
 
@@ -95,8 +93,8 @@ describe('explore API paths', () => {
       serviceName: 'checkout',
       query: 'timeout',
       severityText: 'ERROR',
-      traceId: 'trace-1',
-      spanId: 'span-1',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
       resourceFilter: 'service.version=1.2.3',
       attributeFilter: 'http.route:/checkout',
       hideInternal: true,
@@ -107,7 +105,7 @@ describe('explore API paths', () => {
         '&hideInternal=true&hideNoise=true'
     );
     expect(buildLogStreamPath(query)).toBe(
-      '/api/logs/sse/subscribe?serviceName=checkout&logContent=timeout&traceId=trace-1&spanId=span-1' +
+      '/api/logs/sse/subscribe?serviceName=checkout&logContent=timeout&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef' +
         '&severityText=ERROR&resourceFilter=service.version%3D1.2.3&attributeFilter=http.route%3A%2Fcheckout' +
         '&hideInternal=true&hideNoise=true'
     );
@@ -135,7 +133,7 @@ describe('explore API paths', () => {
       {
         signal: 'traces',
         timeRange: 'last-1h',
-        traceId: 'trace-1',
+        traceId: '0123456789abcdef0123456789abcdef',
         spanId: 'span-selection-only',
         resourceFilter: 'cloud.region=ap-southeast-1',
         attributeFilter: 'http.route=/checkout',
@@ -148,7 +146,7 @@ describe('explore API paths', () => {
       4_000_000
     );
     expect(tracePath).toContain(
-      'traceId=trace-1&resourceFilter=cloud.region%3Dap-southeast-1' +
+      'traceId=0123456789abcdef0123456789abcdef&resourceFilter=cloud.region%3Dap-southeast-1' +
         '&attributeFilter=http.route%3D%2Fcheckout&minDurationMs=100&maxDurationMs=5000' +
         '&errorOnly=true&spanScope=root&hideInternal=true'
     );
@@ -207,6 +205,20 @@ describe('explore API paths', () => {
     expect(buildSignalApiPath(scoped, 4_000_000)).toContain('start=1710000000000&end=1710000005000');
   });
 
+  it('queries an exact entity Metrics handoff without synthetic ingestion dimensions', () => {
+    const query = parseExploreQuery(
+      new URLSearchParams(
+        'signal=metrics&entityId=677625915133184&start=1750000000000&end=1750000060000' +
+          '&timeZone=Asia%2FShanghai&query=request_rate_per_second'
+      )
+    );
+
+    expect(buildSignalApiPath(query)).toBe(
+      '/api/ingestion/otlp/metrics/console?entityId=677625915133184&start=1750000000000' +
+        '&end=1750000060000&query=request_rate_per_second'
+    );
+  });
+
   it.each([
     ['metrics', '/api/ingestion/otlp/metrics/console?'],
     ['logs', '/api/logs/list?'],
@@ -249,51 +261,6 @@ describe('explore API paths', () => {
     expect(openBrowserEventStream).not.toHaveBeenCalled();
   });
 
-  it('loads encoded trace detail through the parser boundary', async () => {
-    const signal = new AbortController().signal;
-    const query = parseExploreQuery(
-      new URLSearchParams(
-        'signal=traces&serviceName=checkout&serviceNamespace=commerce&environment=prod' +
-          '&instance=checkout-1&endpoint=%2Fcheckout&traceId=trace%20%2F%201&spanId=span-1' +
-          '&resourceFilter=service.version%3D1&attributeFilter=http.route%3D%2Fcheckout' +
-          '&minDurationMs=100&maxDurationMs=200&start=1000&end=2000'
-      )
-    );
-    if (query.signal !== 'traces') throw new Error('trace query expected');
-    apiMessageGet.mockResolvedValueOnce({ ...traceRow('trace / 1'), spans: null }).mockResolvedValueOnce([]);
-
-    await expect(loadTraceDetail(query, 'trace / 1', signal)).resolves.toMatchObject({
-      traceId: 'trace / 1',
-      spans: []
-    });
-    const context =
-      'serviceName=checkout&serviceNamespace=commerce&environment=prod&instance=checkout-1' +
-      '&endpoint=%2Fcheckout&start=1000&end=2000&spanId=span-1&resourceFilter=service.version%3D1' +
-      '&attributeFilter=http.route%3D%2Fcheckout&minDurationMs=100&maxDurationMs=200';
-    expect(apiMessageGet).toHaveBeenNthCalledWith(1, `/api/traces/trace%20%2F%201?${context}`, { signal });
-    expect(apiMessageGet).toHaveBeenNthCalledWith(2, `/api/traces/trace%20%2F%201/spans?${context}`, { signal });
-    expect(buildTraceDetailApiPath(query, 'trace / 1', false, 9_999)).toContain('start=1000&end=2000');
-  });
-
-  it('uses one relative time snapshot for trace detail and spans', async () => {
-    const dateNow = vi.spyOn(Date, 'now').mockReturnValueOnce(4_000_000).mockReturnValueOnce(9_000_000);
-    try {
-      apiMessageGet.mockResolvedValueOnce({ ...traceRow('trace-1'), spans: null }).mockResolvedValueOnce([]);
-
-      await loadTraceDetail({ signal: 'traces', timeRange: 'last-30m' }, 'trace-1');
-
-      expect(dateNow).toHaveBeenCalledTimes(1);
-      expect(apiMessageGet).toHaveBeenNthCalledWith(1, '/api/traces/trace-1?start=2200000&end=4000000', {
-        signal: null
-      });
-      expect(apiMessageGet).toHaveBeenNthCalledWith(2, '/api/traces/trace-1/spans?start=2200000&end=4000000', {
-        signal: null
-      });
-    } finally {
-      dateNow.mockRestore();
-    }
-  });
-
   it('passes AbortSignal and parses every raw signal response', async () => {
     const signal = new AbortController().signal;
     apiMessageGet
@@ -308,7 +275,7 @@ describe('explore API paths', () => {
         errorMessage: null
       })
       .mockResolvedValueOnce(stableLogPage([]))
-      .mockResolvedValueOnce(springPage([traceRow('trace-1')]));
+      .mockResolvedValueOnce(springPage([traceRow('0123456789abcdef0123456789abcdef')]));
     await loadMetricSignal({ signal: 'metrics', timeRange: 'last-15m', query: 'up' }, signal);
     await loadLogSignal({ signal: 'logs', timeRange: 'last-15m', pageIndex: 0 }, signal);
     await loadTraceSignal({ signal: 'traces', timeRange: 'last-15m', pageIndex: 0 }, signal);
@@ -361,19 +328,44 @@ describe('explore API paths', () => {
     );
   });
 
+  it('keeps a truly empty metric inventory empty without querying a hidden fallback metric', async () => {
+    const signal = new AbortController().signal;
+    apiMessageGet.mockResolvedValueOnce({ context: null, source: 'greptime-inventory', total: 0, items: [] });
+
+    await expect(loadMetricSignal({ signal: 'metrics', timeRange: 'last-15m' }, signal)).resolves.toMatchObject({
+      kind: 'inventory_empty'
+    });
+    expect(apiMessageGet).toHaveBeenCalledOnce();
+    expect(String(apiMessageGet.mock.calls[0]?.[0])).not.toContain('query=up');
+  });
+
   it('keeps log overview and trend failures independent from a valid page', async () => {
     const signal = new AbortController().signal;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_754_468_100_000);
     apiMessageGet
       .mockResolvedValueOnce(stableLogPage([logRow('valid')]))
       .mockRejectedValueOnce(new Error('overview unavailable'))
-      .mockResolvedValueOnce({ hourlyStats: { '2026-08-06 10:00': 4 } });
+      .mockResolvedValueOnce({
+        start: 1_754_467_200_000,
+        end: 1_754_468_100_000,
+        intervalMs: 60_000,
+        buckets: [{ start: 1_754_467_200_000, count: 4 }]
+      });
 
     await expect(
       loadLogHistoryEvidence({ signal: 'logs', timeRange: 'last-15m', query: 'timeout' }, signal)
     ).resolves.toEqual({
       page: expect.objectContaining({ totalElements: 1 }),
       overview: { kind: 'error' },
-      trend: { kind: 'ready', data: { hourlyStats: { '2026-08-06 10:00': 4 } } }
+      trend: {
+        kind: 'ready',
+        data: {
+          start: 1_754_467_200_000,
+          end: 1_754_468_100_000,
+          intervalMs: 60_000,
+          buckets: [{ start: 1_754_467_200_000, count: 4 }]
+        }
+      }
     });
     expect(apiMessageGet.mock.calls.map(call => String(call[0]))).toEqual([
       expect.stringContaining('/api/logs/list?'),
@@ -381,6 +373,46 @@ describe('explore API paths', () => {
       expect.stringContaining('/api/logs/stats/trend?')
     ]);
     expect(apiMessageGet.mock.calls.every(call => call[1]?.signal === signal)).toBe(true);
+    nowSpy.mockRestore();
+  });
+
+  it('rejects trend evidence for a different relative request window', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_754_468_100_000);
+    apiMessageGet
+      .mockResolvedValueOnce(stableLogPage([logRow('valid')]))
+      .mockRejectedValueOnce(new Error('overview unavailable'))
+      .mockResolvedValueOnce({
+        start: 1_754_467_200_001,
+        end: 1_754_468_100_000,
+        intervalMs: 60_000,
+        buckets: []
+      });
+
+    const evidence = await loadLogHistoryEvidence({ signal: 'logs', timeRange: 'last-15m' });
+
+    expect(evidence.trend).toEqual({ kind: 'error' });
+    nowSpy.mockRestore();
+  });
+
+  it('rejects trend evidence for a different exact request window', async () => {
+    apiMessageGet
+      .mockResolvedValueOnce(stableLogPage([logRow('valid')]))
+      .mockRejectedValueOnce(new Error('overview unavailable'))
+      .mockResolvedValueOnce({
+        start: 1_754_467_200_000,
+        end: 1_754_468_100_001,
+        intervalMs: 60_000,
+        buckets: []
+      });
+
+    const evidence = await loadLogHistoryEvidence({
+      signal: 'logs',
+      timeRange: 'last-15m',
+      start: 1_754_467_200_000,
+      end: 1_754_468_100_000
+    });
+
+    expect(evidence.trend).toEqual({ kind: 'error' });
   });
 
   it('does not turn aborted log statistics into cacheable partial evidence', async () => {
@@ -428,7 +460,7 @@ describe('explore API paths', () => {
         }
       | undefined;
 
-    transportHandlers?.onEvent('LOG_EVENT', JSON.stringify(logRow('valid')));
+    transportHandlers?.onEvent('LOG_EVENT', JSON.stringify(liveLogRow('valid')));
     transportHandlers?.onEvent('LOG_EVENT', '{private malformed body');
     transportHandlers?.onEvent(
       'LOG_STREAM_GAP',
@@ -479,13 +511,16 @@ function traceRow(traceId: string) {
     status: null,
     startTime: null,
     errorSpanCount: 0,
+    spanCount: 1,
+    serviceStats: { checkout: { spanCount: 1, errorCount: 0 } },
     resourceAttributes: null
   };
 }
 
 function logRow(body: string) {
   return {
-    timeUnixNano: 1_750_000_000_000_000_000,
+    logRecordUid: 'event-1',
+    timeUnixNano: '1750000000000000000',
     observedTimeUnixNano: null,
     severityNumber: 9,
     severityText: 'INFO',
@@ -499,5 +534,25 @@ function logRow(body: string) {
     resourceSchemaUrl: null,
     instrumentationScope: null,
     scopeSchemaUrl: null
+  };
+}
+
+function liveLogRow(body: string) {
+  const row = logRow(body);
+  return {
+    timeUnixNano: 1_750_000_000_000_000_000,
+    observedTimeUnixNano: row.observedTimeUnixNano,
+    severityNumber: row.severityNumber,
+    severityText: row.severityText,
+    body: row.body,
+    attributes: row.attributes,
+    droppedAttributesCount: row.droppedAttributesCount,
+    traceId: row.traceId,
+    spanId: row.spanId,
+    traceFlags: row.traceFlags,
+    resource: row.resource,
+    resourceSchemaUrl: row.resourceSchemaUrl,
+    instrumentationScope: row.instrumentationScope,
+    scopeSchemaUrl: row.scopeSchemaUrl
   };
 }

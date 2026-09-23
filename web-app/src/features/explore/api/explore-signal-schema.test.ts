@@ -17,10 +17,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { ExploreSignalContractError, ExploreSignalMissingError } from '../model/explore-signal-contract';
+import { ExploreSignalContractError } from '../model/explore-signal-contract';
 import { parseLogPage } from './explore-log-schema';
 import { parseMetricConsole } from './explore-metric-schema';
-import { parseTraceDetail, parseTracePage, parseTraceSpans } from './explore-trace-schema';
+import { parseTracePage } from './explore-trace-schema';
 
 describe('Explore signal contracts', () => {
   it('strips unknown metric fields while retaining explicit console evidence', () => {
@@ -86,11 +86,12 @@ describe('Explore signal contracts', () => {
     });
   });
 
-  it('retains JSON-safe log body and attributes and strips unknown fields', () => {
+  it('retains JSON-safe log body and attributes', () => {
     const page = parseLogPage(
       stableLogPage([
         {
-          timeUnixNano: 10,
+          logRecordUid: 'event-10',
+          timeUnixNano: '10',
           observedTimeUnixNano: null,
           severityNumber: 9,
           severityText: 'INFO',
@@ -103,23 +104,22 @@ describe('Explore signal contracts', () => {
           resource: {},
           resourceSchemaUrl: null,
           instrumentationScope: null,
-          scopeSchemaUrl: null,
-          secret: 'drop'
+          scopeSchemaUrl: null
         }
       ]),
       0,
       20
     );
-    expect(page.content[0]).not.toHaveProperty('secret');
     expect(page.content[0]?.body).toEqual({ event: ['paid', 1, true, null] });
   });
 
-  it('accepts the lossy Java Long number representation used for epoch nanoseconds', () => {
+  it('rejects a numeric historical epoch timestamp instead of accepting rounded nanoseconds', () => {
     const epochNanos = 1_750_000_000_000_000_000;
-    expect(
+    expect(() =>
       parseLogPage(
         stableLogPage([
           {
+            logRecordUid: 'event-10',
             timeUnixNano: epochNanos,
             observedTimeUnixNano: epochNanos,
             severityNumber: null,
@@ -138,12 +138,13 @@ describe('Explore signal contracts', () => {
         ]),
         0,
         20
-      ).content[0]?.timeUnixNano
-    ).toBe(epochNanos);
+      )
+    ).toThrow(ExploreSignalContractError);
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5])('rejects invalid Java Long value %s', timeUnixNano => {
     const value = {
+      logRecordUid: null,
       timeUnixNano,
       observedTimeUnixNano: null,
       severityNumber: null,
@@ -185,6 +186,7 @@ describe('Explore signal contracts', () => {
 
   it('rejects content beyond the authoritative last-page remainder', () => {
     const content = Array.from({ length: 2 }, () => ({
+      logRecordUid: null,
       timeUnixNano: null,
       observedTimeUnixNano: null,
       severityNumber: null,
@@ -218,87 +220,31 @@ describe('Explore signal contracts', () => {
     expect(() => parseTracePage(springPage([{ ...trace, traceId: null }]), 0, 20)).toThrow(ExploreSignalContractError);
   });
 
-  it('treats null detail as missing and rejects identity drift', () => {
-    expect(() => parseTraceDetail(null, 'trace-1')).toThrow(ExploreSignalMissingError);
-    expect(() => parseTraceDetail({ ...traceRow('trace-2'), spans: null }, 'trace-1')).toThrow(/identity/);
+  it('accepts explicitly unavailable trace completeness evidence', () => {
+    expect(
+      parseTracePage(springPage([{ ...traceRow('trace-1'), spanCount: null, serviceStats: null }]), 0, 20).content[0]
+    ).toMatchObject({ traceId: 'trace-1', spanCount: null, serviceStats: null });
   });
 
-  it('parses nested trace evidence with allowlists', () => {
-    const detail = parseTraceDetail(
-      {
-        ...traceRow('trace-1'),
-        unknown: true,
-        spans: [
-          {
-            traceId: 'trace-1',
-            spanId: 'span-1',
-            parentSpanId: null,
-            spanName: 'GET',
-            serviceName: 'checkout',
-            status: 'OK',
-            spanKind: 'SERVER',
-            statusMessage: null,
-            traceState: null,
-            scopeName: null,
-            scopeVersion: null,
-            durationNanos: 2,
-            startTime: 1,
-            highlighted: false,
-            resourceAttributes: {},
-            spanAttributes: {},
-            events: [
-              { timeUnixNano: 1, name: 'event', attributes: { value: 1 }, droppedAttributesCount: 0, extra: true }
-            ],
-            links: [],
-            codeNavigationHint: null,
-            extra: true
-          }
-        ]
-      },
-      'trace-1'
-    );
-    expect(detail).not.toHaveProperty('unknown');
-    expect(detail.spans?.[0]).not.toHaveProperty('extra');
-    expect(detail.spans?.[0]?.events?.[0]).not.toHaveProperty('extra');
-  });
+  it.each([{ spanCount: -1 }, { spanCount: 1.5 }, { spanCount: undefined }])(
+    'rejects an invalid or missing trace span count',
+    override => {
+      expect(() => parseTracePage(springPage([{ ...traceRow('trace-1'), ...override }]), 0, 20)).toThrow(
+        ExploreSignalContractError
+      );
+    }
+  );
 
   it.each([
-    [[{ spanId: null, traceId: 'trace-1' }]],
-    [[{ spanId: 'span-1', traceId: 'trace-2' }]],
-    [
-      [
-        { spanId: 'span-1', traceId: 'trace-1' },
-        { spanId: 'span-1', traceId: 'trace-1' }
-      ]
-    ]
-  ])('rejects invalid canonical span identity %s', identities => {
-    const spans = identities.map(identity => ({
-      ...identity,
-      parentSpanId: null,
-      spanName: null,
-      serviceName: null,
-      status: null,
-      spanKind: null,
-      statusMessage: null,
-      traceState: null,
-      scopeName: null,
-      scopeVersion: null,
-      durationNanos: null,
-      startTime: null,
-      highlighted: false,
-      resourceAttributes: null,
-      spanAttributes: null,
-      events: null,
-      links: null,
-      codeNavigationHint: null
-    }));
-    expect(() => parseTraceDetail({ ...traceRow('trace-1'), spans }, 'trace-1')).toThrow(ExploreSignalContractError);
-  });
-
-  it('rejects missing, mismatched, and duplicate identities from the dedicated spans response', () => {
-    expect(() => parseTraceSpans([traceSpan('trace-1', null)], 'trace-1')).toThrow(ExploreSignalContractError);
-    expect(() => parseTraceSpans([traceSpan('trace-2', 'span-1')], 'trace-1')).toThrow(ExploreSignalContractError);
-    expect(() => parseTraceSpans([traceSpan('trace-1', 'span-1'), traceSpan('trace-1', 'span-1')], 'trace-1')).toThrow(
+    { serviceStats: undefined },
+    { spanCount: null },
+    { serviceStats: null },
+    { serviceStats: { checkout: { spanCount: 0, errorCount: 0 } } },
+    { serviceStats: { checkout: { spanCount: 2, errorCount: 3 } } },
+    { serviceStats: { checkout: { spanCount: 1, errorCount: 0 } }, spanCount: 2 },
+    { serviceStats: { checkout: { spanCount: 1, errorCount: 0 } }, errorSpanCount: 1 }
+  ])('rejects missing, invalid, or incomplete trace service statistics', override => {
+    expect(() => parseTracePage(springPage([{ ...traceRow('trace-1'), ...override }]), 0, 20)).toThrow(
       ExploreSignalContractError
     );
   });
@@ -323,30 +269,8 @@ function traceRow(traceId: unknown) {
     status: null,
     startTime: null,
     errorSpanCount: 0,
+    spanCount: 1,
+    serviceStats: { checkout: { spanCount: 1, errorCount: 0 } },
     resourceAttributes: null
-  };
-}
-
-function traceSpan(traceId: string, spanId: string | null) {
-  return {
-    traceId,
-    spanId,
-    parentSpanId: null,
-    spanName: null,
-    serviceName: null,
-    status: null,
-    spanKind: null,
-    statusMessage: null,
-    traceState: null,
-    scopeName: null,
-    scopeVersion: null,
-    durationNanos: null,
-    startTime: null,
-    highlighted: false,
-    resourceAttributes: null,
-    spanAttributes: null,
-    events: null,
-    links: null,
-    codeNavigationHint: null
   };
 }

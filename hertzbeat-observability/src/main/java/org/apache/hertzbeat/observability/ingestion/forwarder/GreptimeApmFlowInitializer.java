@@ -17,15 +17,10 @@
 
 package org.apache.hertzbeat.observability.ingestion.forwarder;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hertzbeat.common.runtime.ConditionalOnNormalBusinessRuntime;
@@ -43,7 +38,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriUtils;
 
@@ -60,10 +54,6 @@ public class GreptimeApmFlowInitializer {
 
     private static final String SQL_PATH = "/v1/sql";
     private static final String DEFAULT_GREPTIME_DB_NAME = "public";
-    private static final String TRACE_TABLE = "hzb_traces";
-    private static final String RESOURCE_ATTRIBUTES_COLUMN = "resource_attributes";
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
     private final RestTemplate restTemplate;
     private final ObjectProvider<GreptimeProperties> greptimePropertiesProvider;
     private final OtlpIngestionRetryService retryService;
@@ -92,26 +82,9 @@ public class GreptimeApmFlowInitializer {
         }
         try {
             List<String> statements = readFlowStatements();
-            Set<String> traceTableColumns = null;
             for (String statement : statements) {
-                try {
-                    if (!executeStatement(greptimeProperties, statement)) {
-                        return;
-                    }
-                } catch (HttpClientErrorException.BadRequest ex) {
-                    if (!isTraceResourceAttributeSchemaFailure(statement, ex)) {
-                        throw ex;
-                    }
-                    if (traceTableColumns == null) {
-                        traceTableColumns = traceTableColumns(greptimeProperties);
-                    }
-                    String adaptedStatement = adaptTraceResourceAttributeExpressions(statement, traceTableColumns);
-                    if (statement.equals(adaptedStatement)) {
-                        throw ex;
-                    }
-                    if (!executeStatement(greptimeProperties, adaptedStatement)) {
-                        return;
-                    }
+                if (!executeStatement(greptimeProperties, statement)) {
+                    return;
                 }
             }
             log.info("[observability greptime-apm-flow] initialized Greptime APM RED Flow.");
@@ -167,83 +140,6 @@ public class GreptimeApmFlowInitializer {
                 .map(String::strip)
                 .filter(StringUtils::isNotBlank)
                 .toList();
-    }
-
-    private boolean isTraceResourceAttributeSchemaFailure(String statement, HttpClientErrorException ex) {
-        if (!StringUtils.containsIgnoreCase(statement, "CREATE FLOW IF NOT EXISTS hertzbeat_apm_red_1m_flow")) {
-            return false;
-        }
-        String responseBody = ex.getResponseBodyAsString(StandardCharsets.UTF_8);
-        return StringUtils.containsIgnoreCase(ex.getMessage(), "resource_attributes")
-                || StringUtils.containsIgnoreCase(responseBody, "resource_attributes");
-    }
-
-    private Set<String> traceTableColumns(GreptimeProperties greptimeProperties) {
-        try {
-            ResponseEntity<String> response = restTemplate.exchange(
-                    endpoint(greptimeProperties),
-                    HttpMethod.POST,
-                    sqlRequest(greptimeProperties, "DESC " + TRACE_TABLE),
-                    String.class);
-            if (response == null || !response.getStatusCode().is2xxSuccessful()
-                    || StringUtils.isBlank(response.getBody())) {
-                return Collections.singleton(RESOURCE_ATTRIBUTES_COLUMN);
-            }
-            return parseTraceTableColumns(response.getBody());
-        } catch (RuntimeException | IOException ex) {
-            log.debug("[observability greptime-apm-flow] failed to inspect Greptime trace schema: {}",
-                    ex.getMessage(), ex);
-            return Collections.singleton(RESOURCE_ATTRIBUTES_COLUMN);
-        }
-    }
-
-    private Set<String> parseTraceTableColumns(String responseBody) throws IOException {
-        Set<String> columns = new LinkedHashSet<>();
-        JsonNode root = OBJECT_MAPPER.readTree(responseBody);
-        for (JsonNode output : root.path("output")) {
-            JsonNode rows = output.path("records").path("rows");
-            if (!rows.isArray()) {
-                continue;
-            }
-            for (JsonNode row : rows) {
-                if (row.isArray() && !row.isEmpty() && StringUtils.isNotBlank(row.get(0).asText())) {
-                    columns.add(row.get(0).asText());
-                }
-            }
-        }
-        if (columns.isEmpty()) {
-            return Collections.singleton(RESOURCE_ATTRIBUTES_COLUMN);
-        }
-        return Collections.unmodifiableSet(columns);
-    }
-
-    private String adaptTraceResourceAttributeExpressions(String statement, Set<String> traceTableColumns) {
-        String adaptedStatement = statement;
-        for (String key : List.of(
-                "hertzbeat.workspace_id",
-                "hertzbeat.entity_id",
-                "deployment.environment.name",
-                "service.namespace")) {
-            adaptedStatement = adaptedStatement.replace(
-                    "json_get_string(resource_attributes, '$[\"" + key + "\"]')",
-                    resourceAttributeExpression(traceTableColumns, key));
-        }
-        return adaptedStatement;
-    }
-
-    private String resourceAttributeExpression(Set<String> traceTableColumns, String key) {
-        String flattenedColumn = RESOURCE_ATTRIBUTES_COLUMN + "." + key;
-        if (traceTableColumns.contains(flattenedColumn)) {
-            return quoteIdentifier(flattenedColumn);
-        }
-        if (traceTableColumns.contains(RESOURCE_ATTRIBUTES_COLUMN)) {
-            return "json_get_string(resource_attributes, '$[\"" + key.replace("\"", "\\\"") + "\"]')";
-        }
-        return "NULL";
-    }
-
-    private String quoteIdentifier(String column) {
-        return "\"" + column.replace("\"", "\"\"") + "\"";
     }
 
     private void addAuthenticationHeader(HttpHeaders headers, GreptimeProperties greptimeProperties) {

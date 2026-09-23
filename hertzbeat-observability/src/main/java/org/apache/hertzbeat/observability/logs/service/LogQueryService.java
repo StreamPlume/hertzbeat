@@ -19,6 +19,7 @@ package org.apache.hertzbeat.observability.logs.service;
 
 import java.util.Map;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrend;
 import org.springframework.data.domain.Page;
 
 /**
@@ -50,11 +51,11 @@ public interface LogQueryService {
                                            String resourceFilter, String attributeFilter,
                                            boolean hideInternal, boolean hideNoise);
 
-    Map<String, Object> trendStats(String workspaceId, Long entityId, Long start, Long end, String traceId,
-                                   String spanId, Integer severityNumber, String severityText, String search,
-                                   String serviceName, String serviceNamespace, String environment,
-                                   String resourceFilter, String attributeFilter,
-                                   boolean hideInternal, boolean hideNoise);
+    LogTrend trendStats(String workspaceId, Long entityId, Long start, Long end, String traceId,
+                        String spanId, Integer severityNumber, String severityText, String search,
+                        String serviceName, String serviceNamespace, String environment,
+                        String resourceFilter, String attributeFilter,
+                        boolean hideInternal, boolean hideNoise);
 
     Map<String, Object> groupByStats(String workspaceId, Long entityId, Long start, Long end, String traceId,
                                      String spanId, Integer severityNumber, String severityText, String search,
@@ -156,32 +157,32 @@ public interface LogQueryService {
                 hideInternal, hideNoise);
     }
 
-    default Map<String, Object> trendStats(Long start, Long end, String traceId, String spanId,
-                                           Integer severityNumber, String severityText, String search,
-                                           boolean hideInternal, boolean hideNoise) {
+    default LogTrend trendStats(Long start, Long end, String traceId, String spanId,
+                                Integer severityNumber, String severityText, String search,
+                                boolean hideInternal, boolean hideNoise) {
         return trendStats(start, end, traceId, spanId, severityNumber, severityText, search,
                 null, null, null, hideInternal, hideNoise);
     }
 
-    Map<String, Object> trendStats(Long start, Long end, String traceId, String spanId,
-                                   Integer severityNumber, String severityText, String search,
-                                   String serviceName, String serviceNamespace, String environment,
-                                   boolean hideInternal, boolean hideNoise);
+    LogTrend trendStats(Long start, Long end, String traceId, String spanId,
+                        Integer severityNumber, String severityText, String search,
+                        String serviceName, String serviceNamespace, String environment,
+                        boolean hideInternal, boolean hideNoise);
 
-    default Map<String, Object> trendStats(Long start, Long end, String traceId, String spanId,
-                                           Integer severityNumber, String severityText, String search,
-                                           String serviceName, String serviceNamespace, String environment,
-                                           String resourceFilter, String attributeFilter,
-                                           boolean hideInternal, boolean hideNoise) {
+    default LogTrend trendStats(Long start, Long end, String traceId, String spanId,
+                                Integer severityNumber, String severityText, String search,
+                                String serviceName, String serviceNamespace, String environment,
+                                String resourceFilter, String attributeFilter,
+                                boolean hideInternal, boolean hideNoise) {
         return trendStats(start, end, traceId, spanId, severityNumber, severityText, search,
                 serviceName, serviceNamespace, environment, hideInternal, hideNoise);
     }
 
-    default Map<String, Object> trendStats(Long entityId, Long start, Long end, String traceId, String spanId,
-                                           Integer severityNumber, String severityText, String search,
-                                           String serviceName, String serviceNamespace, String environment,
-                                           String resourceFilter, String attributeFilter,
-                                           boolean hideInternal, boolean hideNoise) {
+    default LogTrend trendStats(Long entityId, Long start, Long end, String traceId, String spanId,
+                                Integer severityNumber, String severityText, String search,
+                                String serviceName, String serviceNamespace, String environment,
+                                String resourceFilter, String attributeFilter,
+                                boolean hideInternal, boolean hideNoise) {
         return trendStats(start, end, traceId, spanId, severityNumber, severityText, search,
                 serviceName, serviceNamespace, environment, resourceFilter, attributeFilter,
                 hideInternal, hideNoise);

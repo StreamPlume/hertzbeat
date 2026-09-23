@@ -20,6 +20,7 @@ package org.apache.hertzbeat.warehouse.repository;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -43,6 +44,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 @ExtendWith(MockitoExtension.class)
 class GreptimeSemanticGraphQueryRepositoryTest {
@@ -130,5 +132,17 @@ class GreptimeSemanticGraphQueryRepositoryTest {
                 .forEach(result -> assertFalse(result.available()));
 
         verify(executor, times(1)).executeStrict(anyString());
+    }
+
+    @Test
+    void greptimeEnabledContextWiresTheRepositoryConstructor() {
+        new ApplicationContextRunner()
+                .withPropertyValues("warehouse.store.greptime.enabled=true")
+                .withBean(GreptimeSqlQueryExecutor.class, () -> executor)
+                .withBean(GreptimeSemanticGraphQueryRepository.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(GreptimeSemanticGraphQueryRepository.class);
+                });
     }
 }

@@ -1,0 +1,223 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import { parseExploreQuery } from './explore-model';
+import { exploreHandoffState } from './explore-query';
+import {
+  buildLogInvestigationPath,
+  buildTraceInvestigationPath,
+  exploreInvestigationRoute,
+  investigationDurationNanoToMillis
+} from './explore-investigation-model';
+
+const sourceWindow = { from: 1_720_000_000_000, to: 1_720_003_600_000 };
+
+describe('Explore investigation route ownership', () => {
+  it('accepts only a complete bounded exact Trace anchor', () => {
+    const ready = parseExploreQuery(
+      new URLSearchParams(
+        'signal=traces&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef&start=1720000000000&end=1720000060000' +
+          '&timeZone=Asia%2FShanghai&entityId=7&serviceName=checkout'
+      )
+    );
+
+    expect(exploreInvestigationRoute(ready)).toEqual({
+      kind: 'trace',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      window: { from: 1_720_000_000_000, to: 1_720_000_060_000, timeZone: 'Asia/Shanghai' }
+    });
+    expect(exploreHandoffState(ready)).toBe('scoped');
+
+    for (const evidence of [
+      'start=1720000000000&timeZone=UTC',
+      'start=1720000060000&end=1720000000000&timeZone=UTC',
+      'start=1720000000000&end=1720086400001&timeZone=UTC',
+      'start=1720000000000&end=1720000060000&timeZone=Not%2FAZone'
+    ]) {
+      const query = parseExploreQuery(
+        new URLSearchParams(`signal=traces&traceId=0123456789abcdef0123456789abcdef&${evidence}`)
+      );
+      expect(exploreInvestigationRoute(query)).toEqual({ kind: 'invalid', signal: 'traces' });
+    }
+  });
+
+  it('keeps traceId-only searches generic but treats every selected Log as route-owned', () => {
+    expect(
+      exploreInvestigationRoute(parseExploreQuery(new URLSearchParams('signal=traces&traceId=trace-filter')))
+    ).toEqual({ kind: 'inactive' });
+
+    for (const route of [
+      'signal=logs&logRecordUid=01J7ZX',
+      'signal=logs&logRecordUid=%20',
+      `signal=logs&logRecordUid=${'x'.repeat(257)}&start=1000&end=2000&timeZone=UTC`,
+      'signal=logs&mode=live&logRecordUid=01J7ZX&start=1000&end=2000&timeZone=UTC'
+    ]) {
+      expect(exploreInvestigationRoute(parseExploreQuery(new URLSearchParams(route)))).toEqual({
+        kind: 'invalid',
+        signal: 'logs'
+      });
+    }
+  });
+
+  it('round-trips a safe opaque selected Log UID without interpreting it as a timestamp', () => {
+    const query = parseExploreQuery(
+      new URLSearchParams(
+        'signal=logs&logRecordUid=01J7ZX_ab%3Acd&start=1720000000000&end=1720000600000' +
+          '&timeZone=America%2FNew_York&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef'
+      )
+    );
+
+    expect(query).toMatchObject({ signal: 'logs', logRecordUid: '01J7ZX_ab:cd' });
+    expect(exploreInvestigationRoute(query)).toEqual({
+      kind: 'log',
+      logRecordUid: '01J7ZX_ab:cd',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      window: { from: 1_720_000_000_000, to: 1_720_000_600_000, timeZone: 'America/New_York' }
+    });
+  });
+
+  it.each([
+    '0123456789abcdef0123456789abcde',
+    '0123456789abcdef0123456789abcdef0',
+    '0123456789abcdef0123456789abcdeg',
+    '0123456789ABCDEF0123456789ABCDEF'
+  ])('rejects non-canonical focused Trace identity %s', invalidTraceId => {
+    const query = parseExploreQuery(
+      new URLSearchParams(`signal=traces&traceId=${invalidTraceId}&start=1000&end=2000&timeZone=UTC`)
+    );
+    expect(exploreInvestigationRoute(query)).toEqual({ kind: 'invalid', signal: 'traces' });
+    expect(exploreHandoffState(query)).toBe('invalid');
+  });
+
+  it('rejects non-canonical optional Trace hints on selected Logs', () => {
+    for (const hints of [
+      'traceId=0123456789ABCDEF0123456789ABCDEF',
+      'traceId=0123456789abcdef0123456789abcdeg',
+      'spanId=0123456789abcde',
+      'spanId=0123456789abcdeG'
+    ]) {
+      const query = parseExploreQuery(
+        new URLSearchParams(`signal=logs&logRecordUid=record-1&start=1000&end=2000&timeZone=UTC&${hints}`)
+      );
+      expect(exploreInvestigationRoute(query)).toEqual({ kind: 'invalid', signal: 'logs' });
+      expect(exploreHandoffState(query)).toBe('invalid');
+    }
+  });
+});
+
+describe('Explore investigation selection windows', () => {
+  it('derives display milliseconds from duration nanoseconds without parsing the raw integer as Number', () => {
+    expect(investigationDurationNanoToMillis('90000000123')).toBe(90_000.000123);
+    expect(investigationDurationNanoToMillis('18446744073709551616')).toBeUndefined();
+    expect(investigationDurationNanoToMillis('01')).toBeUndefined();
+  });
+
+  it('refuses to build focused paths from non-canonical Trace and Span identities', () => {
+    const traceSource = parseExploreQuery(new URLSearchParams('signal=traces&serviceName=checkout'));
+    const logSource = parseExploreQuery(new URLSearchParams('signal=logs&serviceName=checkout'));
+    expect(() =>
+      buildTraceInvestigationPath(
+        traceSource,
+        { traceId: 'TRACE-1', selectedSpanId: null, startTime: null, durationNanos: null },
+        sourceWindow,
+        'UTC'
+      )
+    ).toThrow(/trace identity/i);
+    expect(() =>
+      buildLogInvestigationPath(
+        logSource,
+        { logRecordUid: 'record-1', timeUnixNano: null, spanId: '0123456789abcdeG' },
+        sourceWindow,
+        'UTC'
+      )
+    ).toThrow(/identity/i);
+  });
+
+  it('freezes a Trace around its own bounds and clamps it to the source window', () => {
+    const path = buildTraceInvestigationPath(
+      parseExploreQuery(
+        new URLSearchParams(
+          'signal=traces&serviceName=checkout&entityId=7&start=1720000000000&end=1720003600000&timeZone=UTC'
+        )
+      ),
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        selectedSpanId: '0123456789abcdef',
+        startTime: 1_720_000_010_000,
+        durationNanos: 90_000_000_000
+      },
+      sourceWindow,
+      'Asia/Shanghai'
+    );
+
+    expect(path).toBe(
+      '/explore?signal=traces&timeRange=last-30m&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef' +
+        '&start=1720000000000&end=1720000130000&timeZone=UTC&entityId=7&serviceName=checkout'
+    );
+  });
+
+  it('falls back to the trustworthy effective window when Trace timing is missing', () => {
+    const path = buildTraceInvestigationPath(
+      parseExploreQuery(new URLSearchParams('signal=traces&serviceName=checkout')),
+      { traceId: '0123456789abcdef0123456789abcdef', startTime: null, durationNanos: null },
+      sourceWindow,
+      'Asia/Shanghai'
+    );
+
+    expect(path).toContain('start=1720000000000&end=1720003600000&timeZone=Asia%2FShanghai');
+  });
+
+  it('derives the selected Log window through decimal arithmetic and never embeds nanoseconds in the route', () => {
+    const path = buildLogInvestigationPath(
+      parseExploreQuery(new URLSearchParams('signal=logs&serviceName=checkout&entityId=7')),
+      {
+        logRecordUid: 'record-1',
+        timeUnixNano: '1720001800123456789',
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef'
+      },
+      sourceWindow,
+      'Asia/Shanghai'
+    );
+
+    expect(path).toBe(
+      '/explore?signal=logs&timeRange=last-30m&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef&logRecordUid=record-1' +
+        '&start=1720001500123&end=1720002100124&timeZone=Asia%2FShanghai&entityId=7&serviceName=checkout'
+    );
+    expect(path).not.toContain('1720001800123456789');
+  });
+
+  it('keeps exact QueryContext and span identity when handing a selected Log to Trace', () => {
+    const source = parseExploreQuery(
+      new URLSearchParams(
+        'signal=logs&logRecordUid=record-1&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef&entityId=7&serviceName=checkout' +
+          '&start=1720001500123&end=1720002100124&timeZone=Asia%2FShanghai'
+      )
+    );
+    const path = buildTraceInvestigationPath(
+      source,
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        selectedSpanId: '0123456789abcdef',
+        startTime: null,
+        durationNanos: null
+      },
+      { from: source.start!, to: source.end! },
+      'UTC'
+    );
+
+    expect(path).toBe(
+      '/explore?signal=traces&timeRange=last-30m&traceId=0123456789abcdef0123456789abcdef&spanId=0123456789abcdef' +
+        '&start=1720001500123&end=1720002100124&timeZone=Asia%2FShanghai&entityId=7&serviceName=checkout'
+    );
+    expect(path).not.toContain('logRecordUid');
+  });
+});

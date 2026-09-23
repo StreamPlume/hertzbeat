@@ -50,6 +50,43 @@ test('accepts the documented inward dependency direction', () => {
   assert.equal(result.status, 0, result.output);
 });
 
+test('keeps platform adapters inward and Perses consumers on its public entry', () => {
+  const allowedFixture = createProject({
+    'src/core/runtime-theme.ts': 'export const theme = true;',
+    'src/shared/query-context/index.ts': 'export const queryContext = true;',
+    'src/platform/perses/runtime/perses-runtime.ts': [
+      "import { theme } from '@/core/runtime-theme';",
+      "import { queryContext } from '@/shared/query-context';",
+      'export const runtime = [theme, queryContext];'
+    ].join('\n'),
+    'src/platform/perses/index.ts': "export { runtime as PersesRuntime } from './runtime/perses-runtime';",
+    'src/features/explore/components/metric-chart.ts':
+      "import { PersesRuntime } from '@/platform/perses'; export const chart = PersesRuntime;"
+  });
+  const rejectedFixture = createProject({
+    'src/app/router.ts': 'export const router = true;',
+    'src/layout/shell.ts': 'export const shell = true;',
+    'src/features/explore/model.ts': 'export const model = true;',
+    'src/platform/perses/runtime/perses-runtime.ts': [
+      "import { router } from '@/app/router';",
+      "import { shell } from '@/layout/shell';",
+      "import { model } from '@/features/explore/model';",
+      'export const runtime = [router, shell, model];'
+    ].join('\n'),
+    'src/platform/perses/index.ts': "export { runtime as PersesRuntime } from './runtime/perses-runtime';",
+    'src/features/explore/chart.ts':
+      "import { runtime } from '@/platform/perses/runtime/perses-runtime'; export const chart = runtime;"
+  });
+
+  const allowedResult = cruise(allowedFixture);
+  const rejectedResult = cruise(rejectedFixture);
+
+  assert.equal(allowedResult.status, 0, allowedResult.output);
+  assert.notEqual(rejectedResult.status, 0, rejectedResult.output);
+  assert.match(rejectedResult.output, /no-platform-to-outer-source-layers/);
+  assert.match(rejectedResult.output, /perses-public-entry-only/);
+});
+
 test('rejects runtime dependencies from API, model, and controller into outer feature layers', () => {
   const fixture = createProject({
     'src/features/orders/orders-api.ts':
@@ -140,6 +177,11 @@ test('rejects reverse layer dependencies and presentation transport access', () 
   const fixture = createProject({
     'src/app/router.ts': 'export const router = true;',
     'src/shared/time/time.ts': 'export const now = 1;',
+    'src/platform/perses/index.ts': 'export const PersesRuntime = true;',
+    'src/shared/visualization/perses-bridge.ts':
+      "import { PersesRuntime } from '@/platform/perses'; export const invalidShared = PersesRuntime;",
+    'src/core/visualization/perses-bridge.ts':
+      "import { PersesRuntime } from '@/platform/perses'; export const invalidCore = PersesRuntime;",
     'src/features/instrumentation/api/instrumentation-api.ts': 'export const load = true;',
     'src/features/instrumentation/controller/instrumentation-controller.ts':
       "import { router } from '@/app/router'; export const invalid = router;",
@@ -153,6 +195,7 @@ test('rejects reverse layer dependencies and presentation transport access', () 
   assert.notEqual(result.status, 0, result.output);
   assert.match(result.output, /no-feature-to-app-or-layout/);
   assert.match(result.output, /no-presentation-to-api/);
+  assert.match(result.output, /no-shared-to-outer-layers/);
   assert.match(result.output, /no-core-to-outer-layers/);
 });
 

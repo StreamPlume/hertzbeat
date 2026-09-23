@@ -336,6 +336,87 @@
       }
     },
     "explore": { "metrics": "查詢指標", "logs": "查詢日誌", "traces": "查詢鏈路" },
+    "signals": {
+      "title": "實體信號調查",
+      "availability": "信號可用性",
+      "invalidWindow": "請選擇不超過 24 小時的有效時間視窗。",
+      "openExplore": "在探索中開啟",
+      "items": "{{count}} 項",
+      "traceDetail": "鏈路詳情",
+      "boundMonitors": "綁定監控",
+      "boundMonitorsState": { "unknown": "監控綁定證據不可用。", "empty": "沒有綁定監控。" },
+      "sections": {
+        "metrics": "指標",
+        "logs": "日誌",
+        "traces": "鏈路",
+        "topology": "拓撲",
+        "collection": "採集",
+        "alerts": "告警"
+      },
+      "states": { "available": "可用", "empty": "無資料", "unavailable": "不可用", "unknown": "未知" },
+      "compact": {
+        "metrics": {
+          "empty": "此時間視窗沒有 RED 指標",
+          "unavailable": "RED 指標不可用",
+          "unknown": "RED 指標可用性未知"
+        },
+        "redMetrics": {
+          "empty": "此時間視窗沒有 RED 指標，其他指標來源狀態未知",
+          "unavailable": "RED 指標不可用，其他指標來源狀態未知"
+        },
+        "logs": { "empty": "此時間視窗沒有日誌", "unavailable": "日誌不可用", "unknown": "日誌可用性未知" },
+        "traces": { "empty": "此時間視窗沒有鏈路", "unavailable": "鏈路不可用", "unknown": "鏈路可用性未知" },
+        "topology": { "empty": "沒有關聯實體", "unavailable": "拓撲不可用", "unknown": "拓撲可用性未知" },
+        "collection": {
+          "empty": "此時間視窗沒有採集執行記錄",
+          "unavailable": "採集執行證據不可用",
+          "unknown": "目前檢視沒有採集執行證據"
+        },
+        "alerts": {
+          "empty": "此時間視窗沒有告警證據",
+          "unavailable": "告警證據不可用",
+          "unknown": "時間視窗內的告警證據未知"
+        }
+      },
+      "red": { "requestRate": "請求速率", "errorRate": "錯誤率", "latencyP95": "P95 延遲", "requests": "請求數" },
+      "aria": {
+        "requestRate": "請求速率視覺化",
+        "errorRate": "錯誤率視覺化",
+        "latencyP95": "P95 延遲視覺化",
+        "logs": "日誌證據視覺化",
+        "traces": "鏈路證據視覺化",
+        "traceDetail": "鏈路詳情視覺化"
+      },
+      "evidence": {
+        "title": "證據",
+        "empty": "此時間視窗沒有可關聯的證據。",
+        "greptimeFlow": "Greptime Flow · {{resolution}} 秒",
+        "reasons": {
+          "exact-span": "精確 Span",
+          "exact-trace": "精確 Trace",
+          "same-entity": "同一實體",
+          "bound-monitor": "綁定監控",
+          "canonical-otel-identity": "標準 OpenTelemetry 身分",
+          "topology-related": "拓撲關係",
+          "time-proximity": "時間鄰近"
+        },
+        "confidence": { "exact": "精確匹配", "high": "高可信度", "medium": "中等可信度", "low": "低可信度" }
+      },
+      "alertsCurrentOnly": "目前活躍告警數不作為所選時間視窗的證據顯示。",
+      "query": {
+        "loading": "正在載入信號證據…",
+        "empty": "此時間視窗沒有證據。",
+        "truncated": "目前顯示匹配證據的有界子集。",
+        "truncationUnknown": "結果完整性未知。",
+        "runtimeError": "視覺化執行環境無法呈現該證據。",
+        "investigationActions": "調查操作（{{count}} 筆）",
+        "invalid": "信號請求無效。",
+        "permission": "沒有權限查看該信號。",
+        "overloaded": "信號儲存忙碌，請重試。",
+        "unavailable": "信號儲存不可用。",
+        "contract": "信號儲存傳回了無效回應。"
+      }
+    },
     "topology": { "view": "查看拓撲" },
     "discovery": {
       "action": "探索資源",
@@ -498,6 +579,7 @@
     "datasource": "資料來源",
     "queryMode": "查詢模式",
     "trend": "指標趨勢",
+    "chartUnavailable": "指標圖表暫時無法使用，取樣資料仍可在下方查看。",
     "filter": "標籤條件 key=value",
     "groupBy": "按標籤分組",
     "aggregation": "聚合方式",
@@ -513,6 +595,7 @@
   },
   "exploreLog": {
     "mode": "日誌模式",
+    "history": "歷史",
     "query": "查詢",
     "live": "即時",
     "detail": "日誌詳情",
@@ -541,6 +624,7 @@
     "overview": "日誌概覽",
     "trend": "日誌趨勢",
     "trendEmpty": "此查詢未傳回趨勢時間區段。",
+    "trendInsufficient": "目前視窗只有一個時間區段（{{count}} 筆日誌）。",
     "statisticsUnavailable": "此統計區域無法載入。",
     "statistics": {
       "total": "總計",
@@ -1435,6 +1519,94 @@
       "collapseCard": "收合面板",
       "expandCard": "展開面板",
       "resizeHistory": "調整歷史區高度"
+    }
+  },
+  "monitorSignals": {
+    "title": "監控訊號證據",
+    "availability": "訊號可用性",
+    "window": "調查視窗：{{start}} – {{end}} · {{timeZone}}",
+    "windowUnavailable": "調查視窗不可用。",
+    "source": "來源",
+    "capabilities": {
+      "nativeMetrics": "原生指標",
+      "currentAlerts": "目前告警",
+      "collection": "採集狀態",
+      "boundEntity": "綁定實體",
+      "otlpEvidence": "OTLP 證據"
+    },
+    "states": { "ready": "可用", "empty": "無資料", "unavailable": "不可用", "unknown": "未知" },
+    "sections": {
+      "currentAlerts": "目前告警",
+      "collectionHealth": "採集狀態",
+      "boundEntity": "綁定實體",
+      "otelEvidence": "相關 OTLP 證據"
+    },
+    "alerts": {
+      "scope": "目前狀態 · 不是所選視窗內的歷史記錄",
+      "notRecorded": "未記錄",
+      "activeCount_one": "目前 {{count}} 則活躍告警",
+      "activeCount_other": "目前 {{count}} 則活躍告警",
+      "empty": "目前沒有活躍告警；這不代表所選視窗內沒有歷史告警。",
+      "unavailable": "目前告警證據不可用。",
+      "unknown": "尚未確定目前告警證據。"
+    },
+    "collection": {
+      "last": "最近採集",
+      "duration": "耗時",
+      "outcome": "結果",
+      "collector": "採集器",
+      "notRecorded": "未記錄",
+      "failurePhase": "失敗階段",
+      "failureClass": "失敗類型",
+      "empty": "此調查視窗內沒有觀測到採集執行。",
+      "unavailable": "採集執行證據不可用。",
+      "unknown": "尚未確定採集執行證據。",
+      "outcomes": { "success": "成功", "failure": "失敗" },
+      "phases": {
+        "UNKNOWN": "未知階段",
+        "RESOLVE": "解析",
+        "CONNECT": "連線",
+        "AUTHENTICATE": "驗證",
+        "QUERY": "查詢",
+        "PARSE": "解析回應",
+        "CONVERT": "轉換",
+        "DISPATCH": "分派"
+      },
+      "failureClasses": {
+        "NONE": "無失敗",
+        "UNAVAILABLE": "不可用",
+        "UNREACHABLE": "無法到達",
+        "UNCONNECTABLE": "連線失敗",
+        "COLLECTION": "採集失敗",
+        "TIMEOUT": "逾時",
+        "UNKNOWN": "未知失敗"
+      }
+    },
+    "entity": {
+      "serviceName": "服務名稱",
+      "type": "實體類型",
+      "id": "實體 ID",
+      "namespace": "服務命名空間",
+      "environment": "環境",
+      "open": "開啟實體",
+      "empty": "此監控尚未綁定實體。",
+      "unavailable": "實體綁定證據不可用。",
+      "unknown": "尚未確定實體綁定證據。"
+    },
+    "otel": {
+      "scope": "僅提供此精確綁定中實際觀測到的訊號；探索跳轉會保留調查視窗和時區。",
+      "open": "在探索中開啟{{signal}}",
+      "empty": "此綁定未觀測到相關 OTLP 訊號。",
+      "noEntity": "必須綁定實體才能安全關聯 OTLP 證據。",
+      "unavailable": "相關 OTLP 證據不可用。",
+      "unknown": "尚未確定相關 OTLP 證據。"
+    },
+    "signals": { "metrics": "OTLP 指標", "logs": "日誌", "traces": "鏈路" },
+    "sources": {
+      "currentAlerts": "目前告警",
+      "collection": "Greptime 採集事件",
+      "entityBinding": "監控與實體綁定",
+      "otelBinding": "已觀測綁定訊號"
     }
   },
   "settingsNavigation": {
@@ -3066,6 +3238,7 @@
     },
     "summaryUnavailable": "警報概覽暫時無法使用，仍可查詢警報清單。",
     "investigate": "調查",
+    "askAi": "詢問 AI",
     "openMonitor": "監控",
     "openEntity": "資源",
     "listUnavailable": "警報清單暫時無法使用。",
@@ -3806,6 +3979,72 @@
       "apiKey": "API 金鑰",
       "apiKeyHint": "留空可保留現有金鑰。",
       "save": "儲存提供方"
+    }
+  },
+  "alertInvestigation": {
+    "title": "告警調查",
+    "unnamedAlert": "未命名告警",
+    "exactWindow": "精確時間視窗",
+    "anchor": "告警錨點",
+    "availability": "證據可用性",
+    "notRecorded": "未記錄",
+    "sections": {
+      "metrics": "告警指標",
+      "logs": "日誌",
+      "traces": "追蹤",
+      "topology": "拓撲",
+      "collection": "採集健康"
+    },
+    "states": { "available": "可用", "empty": "此範圍內無證據", "unavailable": "證據不可用" },
+    "actions": {
+      "back": "返回告警",
+      "retry": "重試",
+      "openMetrics": "開啟指標",
+      "openLog": "開啟日誌",
+      "openTrace": "開啟追蹤",
+      "openTopology": "開啟拓撲"
+    },
+    "query": {
+      "loading": "正在載入精確告警證據…",
+      "invalidRoute": "告警調查連結不完整或無效。",
+      "invalid": "證據查詢無效。",
+      "permission": "你沒有權限查看此證據。",
+      "overloaded": "證據服務負載過高。",
+      "unavailable": "告警調查暫不可用。",
+      "contract": "告警證據不符合預期合同。",
+      "runtimeError": "證據執行階段無法呈現此結果。",
+      "truncated": "僅顯示有界結果集。",
+      "truncationUnknown": "完整結果數量未知。"
+    },
+    "metrics": { "before": "之前", "anchor": "告警", "after": "之後" },
+    "logs": { "focusActions": "可聚焦調查的日誌" },
+    "traces": {
+      "traceId": "Trace ID",
+      "service": "服務",
+      "start": "開始",
+      "duration": "持續時間",
+      "status": "狀態",
+      "spans": "Span 數"
+    },
+    "traceStatus": { "error": "錯誤", "ok": "正常", "unset": "未設定", "unknown": "未知" },
+    "topology": {
+      "source": "來源",
+      "target": "目標",
+      "relation": "關係",
+      "confidence": "信賴度",
+      "requests": "請求數",
+      "errors": "錯誤數"
+    },
+    "collection": {
+      "lastCollection": "最近採集",
+      "duration": "持續時間",
+      "outcome": "結果",
+      "collector": "採集器",
+      "target": "目標",
+      "metricSet": "指標集",
+      "failureClass": "失敗類型",
+      "phase": "階段",
+      "notRecorded": "未記錄"
     }
   },
   "aiSchedules": {

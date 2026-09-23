@@ -21,13 +21,14 @@ import { OperationalStatePanel } from '@/shared/operational-page';
 
 import styles from './signal-result-frame.module.css';
 
-type MetaItem = { label: string; value: ReactNode };
+type MetaItem = { label: string; value: ReactNode; accessibleValue?: string | undefined };
 
 export function SignalResultFrame({
   title,
   count,
   unit,
   meta = [],
+  metaPresentation = 'default',
   actions,
   children
 }: {
@@ -35,11 +36,12 @@ export function SignalResultFrame({
   count: number;
   unit?: string | undefined;
   meta?: MetaItem[] | undefined;
+  metaPresentation?: 'default' | 'compact' | undefined;
   actions?: ReactNode | undefined;
   children: ReactNode;
 }) {
   return (
-    <section className={styles.frame}>
+    <section className={styles.frame} data-meta-presentation={metaPresentation}>
       <header className={styles.header}>
         <div className={styles.identity}>
           <h3>{title}</h3>
@@ -52,7 +54,12 @@ export function SignalResultFrame({
           {meta.length > 0 && (
             <dl className={styles.meta}>
               {meta.map(item => (
-                <div key={item.label}>
+                <div
+                  key={item.label}
+                  {...(metaPresentation === 'compact'
+                    ? { 'aria-label': `${item.label}: ${item.accessibleValue ?? ''}`, title: item.label }
+                    : {})}
+                >
                   <dt>{item.label}</dt>
                   <dd>{item.value}</dd>
                 </div>

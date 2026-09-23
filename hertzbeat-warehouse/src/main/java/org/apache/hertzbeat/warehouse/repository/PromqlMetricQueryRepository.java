@@ -43,7 +43,8 @@ public class PromqlMetricQueryRepository implements MetricQueryRepository {
     }
 
     @Override
-    public PromqlRangeQueryResult queryPromqlRange(String refId, String query, long start, long end, String step) {
+    public PromqlRangeQueryResult queryPromqlRange(
+            String refId, String query, long start, long end, String step, Integer maxSeries) {
         QueryExecutor queryExecutor = resolvePromqlExecutor();
         if (queryExecutor == null) {
             return new PromqlRangeQueryResult(null, null, PROMQL_EXECUTOR_UNAVAILABLE);
@@ -57,6 +58,7 @@ public class PromqlMetricQueryRepository implements MetricQueryRepository {
                 .start(start)
                 .end(end)
                 .step(step)
+                .limit(maxSeries)
                 .build();
         try {
             DatasourceQueryData results = queryExecutor.query(datasourceQuery);

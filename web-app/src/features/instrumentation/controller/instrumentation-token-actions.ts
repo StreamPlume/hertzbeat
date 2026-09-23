@@ -5,7 +5,7 @@
  * The ASF licenses this file to You under the Apache License, Version 2.0.
  */
 
-import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, type MutableRefObject } from 'react';
 
 import { generateAccessToken } from '@/shared/access-token/access-token-generation-api';
 import {
@@ -22,7 +22,7 @@ type IntakeProfile = IntakeProfilesResponse['profiles'][number];
 
 export function useInstrumentationTokenActions(
   state: InstrumentationControllerState,
-  generationRef: RefObject<number>,
+  generationRef: MutableRefObject<number>,
   canGenerateToken: boolean,
   requiresToken: boolean,
   selectedProfile: IntakeProfile | undefined,
@@ -76,7 +76,10 @@ export function useInstrumentationTokenActions(
   return { setToken, ...draftActions, generateToken };
 }
 
-function useTokenDraftActions(state: InstrumentationControllerState, tokenCommandsEnabledRef: RefObject<boolean>) {
+function useTokenDraftActions(
+  state: InstrumentationControllerState,
+  tokenCommandsEnabledRef: MutableRefObject<boolean>
+) {
   const openTokenGenerator = useCallback(() => {
     if (!tokenCommandsEnabledRef.current || state.tokenGenerating) return;
     state.setTokenError(false);
@@ -98,8 +101,8 @@ function useTokenDraftActions(state: InstrumentationControllerState, tokenComman
 
 function useTokenSetter(
   state: InstrumentationControllerState,
-  generationRef: RefObject<number>,
-  requiresTokenRef: RefObject<boolean>
+  generationRef: MutableRefObject<number>,
+  requiresTokenRef: MutableRefObject<boolean>
 ) {
   const flowGeneration = generationRef.current;
   return useCallback(
@@ -121,7 +124,7 @@ function useRetireTokenGeneration(
   tokenCommandsEnabled: boolean,
   requiresToken: boolean,
   state: InstrumentationControllerState,
-  tokenGenerationRef: RefObject<number>
+  tokenGenerationRef: MutableRefObject<number>
 ) {
   const previousCommandsEnabled = useRef(tokenCommandsEnabled);
   const previousRequiresToken = useRef(requiresToken);
@@ -140,9 +143,9 @@ function useRetireTokenGeneration(
 }
 
 function generationIsCurrent(
-  flowGenerationRef: RefObject<number>,
+  flowGenerationRef: MutableRefObject<number>,
   flowGeneration: number,
-  tokenGenerationRef: RefObject<number>,
+  tokenGenerationRef: MutableRefObject<number>,
   tokenGeneration: number
 ) {
   return flowGenerationRef.current === flowGeneration && tokenGenerationRef.current === tokenGeneration;

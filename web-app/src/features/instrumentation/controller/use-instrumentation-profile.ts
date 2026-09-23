@@ -7,7 +7,7 @@ import { useInstrumentationTokenActions } from './instrumentation-token-actions'
 
 export function useInstrumentationProfile(
   state: ReturnType<typeof useInstrumentationControllerState>,
-  generationRef: React.RefObject<number>,
+  generationRef: React.MutableRefObject<number>,
   profiles: IntakeProfilesResponse['profiles'] | undefined,
   workspaceId: string | undefined,
   tokenCapable: boolean

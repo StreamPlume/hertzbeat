@@ -205,12 +205,18 @@ describe('route registry', () => {
       getAppRoute('monitor-new'),
       getAppRoute('monitor-edit'),
       getAppRoute('monitor-detail'),
+      getAppRoute('alert-investigation'),
       getAppRoute('alert-rule-new'),
       getAppRoute('alert-rule-edit')
     ]).toEqual([
       expect.objectContaining({ id: 'monitor-new', path: '/monitors/new', kind: 'page' }),
       expect.objectContaining({ id: 'monitor-edit', path: '/monitors/:monitorId/edit', kind: 'page' }),
       expect.objectContaining({ id: 'monitor-detail', path: '/monitors/:monitorId', kind: 'page' }),
+      expect.objectContaining({
+        id: 'alert-investigation',
+        path: '/alerts/:alertId/investigate',
+        kind: 'page'
+      }),
       expect.objectContaining({ id: 'alert-rule-new', path: '/alerts/rules/new', kind: 'page' }),
       expect.objectContaining({ id: 'alert-rule-edit', path: '/alerts/rules/:ruleId/edit', kind: 'page' })
     ]);

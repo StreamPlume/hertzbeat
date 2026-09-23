@@ -20,7 +20,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { TFunction } from 'i18next';
 import { useState, type ReactNode } from 'react';
 
-import type { ExplorePageResult, LogRow } from '../model/explore-signal-contract';
+import type { ExplorePageResult, LiveLogRow, LogRow } from '../model/explore-signal-contract';
 import {
   buildCrossSignalPath,
   buildExplorePath,
@@ -35,7 +35,8 @@ import styles from './log-result.module.css';
 import { SignalResultFrame } from './signal-result-frame';
 
 type Navigate = (path: string) => void;
-type LogSelection = { scopeKey: string; row: LogRow };
+type DisplayLogRow = LogRow | LiveLogRow;
+type LogSelection = { scopeKey: string; row: DisplayLogRow };
 
 export function LogRows({
   rows,
@@ -46,9 +47,11 @@ export function LogRows({
   evidenceCurrent = true,
   live,
   connection,
-  actions
+  actions,
+  onSelectLog,
+  onOpenTrace
 }: {
-  rows: LogRow[];
+  rows: DisplayLogRow[];
   data?: ExplorePageResult<LogRow> | undefined;
   query: LogExploreQuery;
   t: TFunction;
@@ -57,6 +60,8 @@ export function LogRows({
   live?: boolean | undefined;
   connection?: ReactNode | undefined;
   actions?: ReactNode | undefined;
+  onSelectLog?: ((row: LogRow) => void) | undefined;
+  onOpenTrace?: ((row: LogRow) => void) | undefined;
 }) {
   const scopeKey = exploreEvidenceScopeKey(query);
   const [selection, setSelection] = useState<LogSelection>();
@@ -69,7 +74,7 @@ export function LogRows({
       meta={live ? [{ label: t('exploreLog.streamStatus'), value: connection }] : []}
       actions={actions}
     >
-      <Table<LogRow>
+      <Table<DisplayLogRow>
         className={evidenceCurrent ? (styles.clickableTable ?? '') : ''}
         rowKey={row =>
           `${row.timeUnixNano ?? row.observedTimeUnixNano ?? 'log'}-${row.traceId ?? ''}-${row.spanId ?? ''}`
@@ -79,10 +84,18 @@ export function LogRows({
         dataSource={rows}
         pagination={logPagination(data, query, navigate, evidenceCurrent)}
         scroll={{ x: 980, y: 520 }}
-        onRow={row => (evidenceCurrent ? interactiveTableRow(() => setSelection({ scopeKey, row })) : {})}
-        columns={logColumns(t, query, navigate, evidenceCurrent)}
+        onRow={row => {
+          if (!evidenceCurrent) return {};
+          if (onSelectLog) {
+            return isHistoricalLog(row) && row.logRecordUid ? interactiveTableRow(() => onSelectLog(row)) : {};
+          }
+          return interactiveTableRow(() => setSelection({ scopeKey, row }));
+        }}
+        columns={logColumns(t, query, navigate, evidenceCurrent, onOpenTrace)}
       />
-      <LogDetail row={selected} t={t} query={query} navigate={navigate} onClose={() => setSelection(undefined)} />
+      {!onSelectLog && (
+        <LogDetail row={selected} t={t} query={query} navigate={navigate} onClose={() => setSelection(undefined)} />
+      )}
     </SignalResultFrame>
   );
 }
@@ -91,8 +104,9 @@ function logColumns(
   t: TFunction,
   query: LogExploreQuery,
   navigate: Navigate,
-  evidenceCurrent: boolean
-): ColumnsType<LogRow> {
+  evidenceCurrent: boolean,
+  onOpenTrace?: (row: LogRow) => void
+): ColumnsType<DisplayLogRow> {
   return [
     { title: t('explore.time'), width: 190, render: (_, row) => formatLogTime(row) },
     {
@@ -113,7 +127,8 @@ function logColumns(
             disabled={!evidenceCurrent}
             onClick={event => {
               event.stopPropagation();
-              void navigate(buildCrossSignalPath(query, 'traces', { traceId: row.traceId ?? undefined }));
+              if (onOpenTrace && isHistoricalLog(row)) onOpenTrace(row);
+              else void navigate(buildCrossSignalPath(query, 'traces', { traceId: row.traceId ?? undefined }));
             }}
           >
             {shortId(row.traceId)}
@@ -123,6 +138,10 @@ function logColumns(
         )
     }
   ];
+}
+
+function isHistoricalLog(row: DisplayLogRow): row is LogRow {
+  return 'logRecordUid' in row;
 }
 
 function logPagination(

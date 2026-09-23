@@ -24,11 +24,7 @@ import { OperationalStatePanel, type OperationalStateKind } from '@/shared/opera
 import styles from './explore-state-panel.module.css';
 
 export function ExploreResultFrame({ children }: { children: ReactNode }) {
-  return (
-    <section className={styles.results} aria-live="polite">
-      {children}
-    </section>
-  );
+  return <section className={styles.results}>{children}</section>;
 }
 
 export function ExploreLoadingResult() {

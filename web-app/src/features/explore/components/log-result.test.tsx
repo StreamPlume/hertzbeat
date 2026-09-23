@@ -22,6 +22,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { i18n, initializeI18n, loadLocale } from '@/core/i18n/i18n';
 
+import { ExploreLogStatistics } from './explore-log-statistics';
 import { LogResult } from './log-result';
 
 describe('LogResult', () => {
@@ -50,8 +51,21 @@ describe('LogResult', () => {
 
     fireEvent.click(screen.getByRole('button', { name: i18n.t('exploreLog.openTrace') }));
     expect(navigate).toHaveBeenCalledWith(expect.stringContaining('signal=traces'));
-    expect(navigate).toHaveBeenCalledWith(expect.stringContaining('traceId=trace-1'));
+    expect(navigate).toHaveBeenCalledWith(expect.stringContaining('traceId=0123456789abcdef0123456789abcdef'));
     expect(navigate).toHaveBeenCalledWith(expect.stringContaining('timeRange=last-30m'));
+  });
+
+  it('delegates historical selection to the focused route callback without opening a local detail drawer', () => {
+    const onSelectLog = vi.fn();
+    render(
+      <I18nextProvider i18n={i18n}>
+        <Subject onSelectLog={onSelectLog} />
+      </I18nextProvider>
+    );
+
+    fireEvent.click(screen.getByRole('row', { name: /payment timeout/ }));
+    expect(onSelectLog).toHaveBeenCalledWith(expect.objectContaining({ logRecordUid: 'log-1' }));
+    expect(screen.queryByRole('dialog', { name: i18n.t('exploreLog.detail') })).toBeNull();
   });
 
   it('closes selected log evidence when the query scope changes', async () => {
@@ -155,8 +169,7 @@ describe('LogResult', () => {
   it('renders non-empty hourly evidence as an accessible time-series chart instead of row-by-row history', () => {
     render(
       <I18nextProvider i18n={i18n}>
-        <LogResult
-          data={{ content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 }}
+        <ExploreLogStatistics
           statistics={{
             overview: {
               kind: 'ready',
@@ -172,19 +185,73 @@ describe('LogResult', () => {
             },
             trend: {
               kind: 'ready',
-              data: { hourlyStats: { '2026-08-06 10:00': 4, '2026-08-06 11:00': 8 } }
+              data: {
+                start: 1_754_467_200_000,
+                end: 1_754_474_400_000,
+                intervalMs: 3_600_000,
+                buckets: [
+                  { start: 1_754_467_200_000, count: 4 },
+                  { start: 1_754_470_800_000, count: 8 }
+                ]
+              }
             }
           }}
-          query={{ signal: 'logs', timeRange: 'last-30m' }}
+          timeWindow={{ from: 1_754_467_200_000, to: 1_754_474_400_000 }}
+          runtimeIdentity="logs-trend:revision-1"
           t={i18n.t}
-          navigate={vi.fn()}
         />
       </I18nextProvider>
     );
 
     const trend = screen.getByRole('region', { name: i18n.t('exploreLog.trend') });
+    const runtime = trend.querySelector('[data-visualization-runtime="perses"]');
+    expect(runtime).toHaveAttribute('data-variant', 'compact');
+    expect(runtime?.firstElementChild).not.toHaveAttribute('style');
     expect(within(trend).getByRole('img', { name: i18n.t('exploreLog.trend') })).toBeInTheDocument();
     expect(within(trend).queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  it('reports a single observed trend bucket instead of presenting an empty chart grid as a trend', () => {
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ExploreLogStatistics
+          statistics={{
+            overview: {
+              kind: 'ready',
+              data: {
+                totalCount: 6,
+                traceCount: 0,
+                debugCount: 0,
+                infoCount: 6,
+                warnCount: 0,
+                errorCount: 0,
+                fatalCount: 0
+              }
+            },
+            trend: {
+              kind: 'ready',
+              data: {
+                start: 1_754_467_200_000,
+                end: 1_754_470_800_000,
+                intervalMs: 3_600_000,
+                buckets: [{ start: 1_754_467_200_000, count: 6 }]
+              }
+            }
+          }}
+          timeWindow={{ from: 1_754_467_200_000, to: 1_754_470_800_000 }}
+          runtimeIdentity="logs-trend:revision-single"
+          t={i18n.t}
+        />
+      </I18nextProvider>
+    );
+
+    const trend = screen.getByRole('region', { name: i18n.t('exploreLog.trend') });
+    expect(screen.getByRole('region', { name: i18n.t('exploreLog.overview') })).toHaveAttribute(
+      'data-explore-evidence-summary'
+    );
+    expect(trend).toHaveAttribute('data-trend-density', 'visualization');
+    expect(within(trend).getByText(i18n.t('exploreLog.trendInsufficient', { count: 6 }))).toBeInTheDocument();
+    expect(within(trend).getByRole('img', { name: i18n.t('exploreLog.trend') })).toBeInTheDocument();
   });
 
   it.each([
@@ -266,10 +333,12 @@ describe('LogResult', () => {
 
 function Subject({
   navigate = vi.fn(),
-  query = defaultLogQuery
+  query = defaultLogQuery,
+  onSelectLog
 }: {
   navigate?: (path: string) => void;
   query?: typeof defaultLogQuery & { serviceName?: string | undefined };
+  onSelectLog?: React.ComponentProps<typeof LogResult>['onSelectLog'];
 }) {
   const { t } = useTranslation();
   return (
@@ -277,14 +346,15 @@ function Subject({
       data={{
         content: [
           {
-            timeUnixNano: 1_750_000_000_000_000_000,
+            logRecordUid: 'log-1',
+            timeUnixNano: '1750000000000000000',
             observedTimeUnixNano: null,
             severityNumber: null,
             severityText: 'ERROR',
             body: 'payment timeout',
             droppedAttributesCount: null,
-            traceId: 'trace-1',
-            spanId: 'span-1',
+            traceId: '0123456789abcdef0123456789abcdef',
+            spanId: '0123456789abcdef',
             traceFlags: null,
             resource: { 'service.name': 'checkout', 'service.version': '1.2.3' },
             attributes: { 'retry.count': 2 },
@@ -301,6 +371,7 @@ function Subject({
       query={query}
       t={t}
       navigate={navigate}
+      onSelectLog={onSelectLog}
     />
   );
 }

@@ -19,6 +19,7 @@ package org.apache.hertzbeat.observability.ingestion.forwarder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
@@ -29,6 +30,8 @@ import static org.mockito.Mockito.when;
 import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.greptime.GreptimeProperties;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,7 +89,7 @@ class GreptimeTraceTableInitializerTest {
 
         String sql = decodeSql(entityCaptor.getValue());
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS hzb_traces"));
-        assertTrue(sql.contains("\"timestamp\" TIMESTAMP(9) TIME INDEX"));
+        assertTrue(sql.contains("\"timestamp\" TIMESTAMP(9) NOT NULL TIME INDEX"));
         assertTrue(sql.contains("\"trace_id\" STRING NULL SKIPPING INDEX"));
         assertTrue(sql.contains("WITH (append_mode = true, table_data_model = 'greptime_trace_v1')"));
         assertEquals(MediaType.APPLICATION_FORM_URLENCODED, entityCaptor.getValue().getHeaders().getContentType());
@@ -99,12 +102,64 @@ class GreptimeTraceTableInitializerTest {
         String sql = bundledTraceTableSql();
 
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS hzb_traces"));
-        assertTrue(sql.contains("\"timestamp\" TIMESTAMP(9) TIME INDEX"));
+        assertTrue(sql.contains("\"timestamp\" TIMESTAMP(9) NOT NULL TIME INDEX"));
         assertTrue(sql.contains("\"duration_nano\" BIGINT UNSIGNED NULL"));
         assertTrue(sql.contains("\"trace_id\" STRING NULL SKIPPING INDEX WITH(granularity = '10240', type = 'BLOOM')"));
-        assertTrue(sql.contains("\"resource_attributes\" JSON NULL"));
-        assertTrue(sql.contains("PRIMARY KEY(\"service_name\")"));
+        assertTrue(sql.contains("\"parent_span_id\" STRING NULL SKIPPING INDEX"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.workspace_id\" STRING NULL SKIPPING INDEX "
+                + "WITH(granularity = '10240', type = 'BLOOM')"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.entity_id\" STRING NULL SKIPPING INDEX"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.entity_type\" STRING NULL SKIPPING INDEX "
+                + "WITH(granularity = '10240', type = 'BLOOM')"));
+        assertTrue(sql.contains("\"resource_attributes.service.namespace\" STRING NULL SKIPPING INDEX "
+                + "WITH(granularity = '10240', type = 'BLOOM')"));
+        assertTrue(sql.contains("\"resource_attributes.service.instance.id\" STRING NULL SKIPPING INDEX"));
+        assertTrue(sql.contains("\"resource_attributes.deployment.environment.name\" STRING NULL SKIPPING INDEX "
+                + "WITH(granularity = '10240', type = 'BLOOM')"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.collector.id\" STRING NULL SKIPPING INDEX"));
+        assertTrue(sql.contains("\"span_events\" JSON NULL"));
+        assertTrue(sql.contains("\"span_links\" JSON NULL"));
+        assertFalse(sql.contains("\"resource_attributes\" JSON"));
+        assertFalse(sql.contains("\"span_attributes\" JSON"));
+        assertEquals("PRIMARY KEY(\"service_name\")", primaryKeyClause(sql));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.hertzbeat.workspace_id"));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.service.namespace"));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.deployment.environment.name"));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.hertzbeat.entity_type"));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.service.instance.id"));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.hertzbeat.collector.id"));
+        assertFalse(primaryKeyClause(sql).contains("resource_attributes.hertzbeat.entity_id"));
         assertTrue(sql.contains("WITH (append_mode = true, table_data_model = 'greptime_trace_v1')"));
+    }
+
+    @Test
+    void richTraceSeedUsesProductionSchemaAndNativeFlattenedPipeline() throws Exception {
+        String script = Files.readString(repositoryRoot().resolve("script/dev/seed-trace-rich-demo.sh"));
+
+        assertTrue(script.contains("greptime/tables/hzb_traces.sql"));
+        assertTrue(script.contains("X-Greptime-Trace-Table-Name: hzb_traces"));
+        assertTrue(script.contains("X-Greptime-Pipeline-Name: greptime_trace_v1"));
+        assertTrue(script.contains("hertzbeat.workspace_id"));
+        assertTrue(script.contains("hertzbeat.entity_id"));
+        assertTrue(script.contains("hertzbeat.entity_type"));
+        assertTrue(script.contains("service.namespace"));
+        assertTrue(script.contains("deployment.environment.name"));
+        assertTrue(script.contains("service.version"));
+        assertTrue(script.contains("db.system"));
+        assertFalse(script.contains("\"resource_attributes\" JSON"));
+        assertFalse(script.contains("\"span_attributes\" JSON"));
+        assertFalse(script.contains("INSERT INTO hzb_traces"));
+    }
+
+    private Path repositoryRoot() {
+        Path candidate = Path.of("").toAbsolutePath();
+        while (candidate != null) {
+            if (Files.isRegularFile(candidate.resolve("script/dev/seed-trace-rich-demo.sh"))) {
+                return candidate;
+            }
+            candidate = candidate.getParent();
+        }
+        throw new IllegalStateException("Could not locate HertzBeat repository root");
     }
 
     @Test
@@ -264,5 +319,13 @@ class GreptimeTraceTableInitializerTest {
             assertNotNull(inputStream);
             return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    private String primaryKeyClause(String sql) {
+        int start = sql.indexOf("PRIMARY KEY(");
+        assertTrue(start >= 0);
+        int end = sql.indexOf(')', start);
+        assertTrue(end > start);
+        return sql.substring(start, end + 1);
     }
 }

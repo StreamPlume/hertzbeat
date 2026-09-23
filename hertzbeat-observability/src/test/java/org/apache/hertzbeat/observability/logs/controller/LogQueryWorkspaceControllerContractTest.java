@@ -60,7 +60,9 @@ class LogQueryWorkspaceControllerContractTest {
         });
         mockMvc = org.springframework.test.web.servlet.setup.MockMvcBuilders
                 .standaloneSetup(new LogQueryController(logQueryService,
-                        new ObservabilityQueryAdmissionService(8, 8, 8, 4, 8, Duration.ofMillis(100))))
+                        new ObservabilityQueryAdmissionService(8, 8, 8, 4, 8, Duration.ofMillis(100)),
+                        org.mockito.Mockito.mock(org.apache.hertzbeat.observability.investigation.service
+                                .LogInvestigationReadModelService.class)))
                 .setControllerAdvice(new UnavailableAdvice())
                 .build();
     }
@@ -106,10 +108,6 @@ class LogQueryWorkspaceControllerContractTest {
         String complexAttributeFilter = "http.route CONTAINS '/checkout'";
         return List.of(
                 MockMvcRequestBuilders.get("/api/logs/list")
-                        .param("resourceFilter", complexResourceFilter)
-                        .param("attributeFilter", complexAttributeFilter),
-                MockMvcRequestBuilders.get("/api/logs/context")
-                        .param("logTimeUnixNano", "1734005477630000000")
                         .param("resourceFilter", complexResourceFilter)
                         .param("attributeFilter", complexAttributeFilter),
                 MockMvcRequestBuilders.get("/api/logs/stats/overview")

@@ -20,11 +20,12 @@ import { ShellNavigationLink } from './shell-navigation-link';
 
 type ShellNavigationProps = {
   collapsed: boolean;
+  collapseLocked?: boolean | undefined;
   onCollapsedChange: (collapsed: boolean) => void;
 };
 const noSessionRoles: readonly string[] = [];
 
-export function ShellNavigation({ collapsed, onCollapsedChange }: ShellNavigationProps) {
+export function ShellNavigation({ collapsed, collapseLocked = false, onCollapsedChange }: ShellNavigationProps) {
   const { t } = useTranslation();
   const { session } = useSession();
   const location = useLocation();
@@ -73,14 +74,16 @@ export function ShellNavigation({ collapsed, onCollapsedChange }: ShellNavigatio
           onToggle={toggle}
         />
       </nav>
-      <button
-        className={styles.collapseButton}
-        type="button"
-        aria-label={t(collapsed ? 'shell.navigation.expand' : 'shell.navigation.collapse')}
-        onClick={() => onCollapsedChange(!collapsed)}
-      >
-        {collapsed ? <RightOutlined /> : <LeftOutlined />}
-      </button>
+      {collapseLocked ? null : (
+        <button
+          className={styles.collapseButton}
+          type="button"
+          aria-label={t(collapsed ? 'shell.navigation.expand' : 'shell.navigation.collapse')}
+          onClick={() => onCollapsedChange(!collapsed)}
+        >
+          {collapsed ? <RightOutlined /> : <LeftOutlined />}
+        </button>
+      )}
     </aside>
   );
 }

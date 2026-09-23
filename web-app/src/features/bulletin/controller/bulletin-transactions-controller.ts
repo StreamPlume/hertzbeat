@@ -2,7 +2,7 @@
 
 import { useNotification } from '@refinedev/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import type { BulletinDependencyProof } from '../model/bulletin-dependency-proof';
 import { classifyBulletinFailure, type BulletinFailureKind } from '../model/bulletin-failure';
@@ -27,8 +27,8 @@ type BulletinValidationProof = Pick<
 >;
 
 type TransactionContext = {
-  canDeleteRef: RefObject<boolean>;
-  canWriteRef: RefObject<boolean>;
+  canDeleteRef: MutableRefObject<boolean>;
+  canWriteRef: MutableRefObject<boolean>;
   dependencies: BulletinValidationProof;
   editor: BulletinEditorController;
   gate: BulletinOperationGate;
@@ -87,7 +87,7 @@ function useBulletinRemove(
   context: TransactionContext,
   client: ReturnType<typeof useQueryClient>,
   notification: ReturnType<typeof useNotification>,
-  confirmedDeletedIdsRef: RefObject<Set<number>>
+  confirmedDeletedIdsRef: MutableRefObject<Set<number>>
 ) {
   return useCallback(
     async (ids: readonly number[], batch: boolean) => {
@@ -126,7 +126,7 @@ function useBulletinRecovery(
   context: TransactionContext,
   client: ReturnType<typeof useQueryClient>,
   notification: ReturnType<typeof useNotification>,
-  confirmedDeletedIdsRef: RefObject<Set<number>>
+  confirmedDeletedIdsRef: MutableRefObject<Set<number>>
 ) {
   return useCallback(async () => {
     if (!canRetryBulletinRecovery(context)) return false;

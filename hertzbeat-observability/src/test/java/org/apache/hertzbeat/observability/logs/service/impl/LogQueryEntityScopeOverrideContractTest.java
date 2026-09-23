@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrend;
 import org.apache.hertzbeat.common.entity.manager.ObserveEntity;
 import org.apache.hertzbeat.common.observability.gateway.ObservabilityWorkspaceQueryGateway;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.HistoryDataReader;
@@ -50,6 +51,9 @@ class LogQueryEntityScopeOverrideContractTest {
     private static final String WORKSPACE = "team-a";
     private static final long ENTITY_ID = 42L;
     private static final String ENTITY_RESOURCE_KEY = "hertzbeat.entity_id";
+    private static final long LOG_TIME_NANOS = 1_734_005_477_630_000_000L;
+    private static final long TREND_START_MS = Math.floorDiv(LOG_TIME_NANOS / 1_000_000L, 60_000L) * 60_000L;
+    private static final long TREND_END_MS = TREND_START_MS + 30 * 60_000L;
 
     @ParameterizedTest(name = "{0}: {1}")
     @MethodSource("readAndCallerFilterCases")
@@ -112,6 +116,9 @@ class LogQueryEntityScopeOverrideContractTest {
                 return List.of(logEntry(ENTITY_ID), logEntry(99L));
             }
             if (methodName.startsWith("countLog")) {
+                if (methodName.equals("countLogsByInterval")) {
+                    return List.of();
+                }
                 return invocation.getMethod().getReturnType() == long.class ? 0L : Map.of();
             }
             return Answers.RETURNS_DEFAULTS.answer(invocation);
@@ -120,7 +127,7 @@ class LogQueryEntityScopeOverrideContractTest {
 
     private LogEntry logEntry(long entityId) {
         return LogEntry.builder()
-                .timeUnixNano(1_734_005_477_630_000_000L)
+                .timeUnixNano(LOG_TIME_NANOS)
                 .resource(Map.of(
                         "hertzbeat.workspace_id", WORKSPACE,
                         ENTITY_RESOURCE_KEY, String.valueOf(entityId),
@@ -180,8 +187,7 @@ class LogQueryEntityScopeOverrideContractTest {
                                 .get("withoutTrace"))
                         .isEqualTo(1L);
                 case TREND -> assertThat(
-                        ((Map<String, Long>) ((Map<String, Object>) result).get("hourlyStats"))
-                                .values())
+                        ((LogTrend) result).buckets().stream().map(bucket -> bucket.count()))
                         .containsExactly(1L);
                 case GROUP -> assertThat((List<Map<String, Object>>) ((Map<String, Object>) result).get("groups"))
                         .singleElement()
@@ -202,7 +208,7 @@ class LogQueryEntityScopeOverrideContractTest {
                         null, null, null, null, null, null, null,
                         null, null, null, resourceFilter, null, 0, 20, false, false);
                 case CONTEXT -> service.context(WORKSPACE, entityId,
-                        1_734_005_477_630_000_000L, null, null,
+                        LOG_TIME_NANOS, null, null,
                         null, null, null, resourceFilter, null, 10, null, null, false, false);
                 case OVERVIEW -> service.overviewStats(WORKSPACE, entityId,
                         null, null, null, null, null, null, null,
@@ -211,7 +217,7 @@ class LogQueryEntityScopeOverrideContractTest {
                         null, null, null, null, null, null, null,
                         null, null, null, resourceFilter, null, false, false);
                 case TREND -> service.trendStats(WORKSPACE, entityId,
-                        null, null, null, null, null, null, null,
+                        TREND_START_MS, TREND_END_MS, null, null, null, null, null,
                         null, null, null, resourceFilter, null, false, false);
                 case GROUP -> service.groupByStats(WORKSPACE, entityId,
                         null, null, null, null, null, null, null,

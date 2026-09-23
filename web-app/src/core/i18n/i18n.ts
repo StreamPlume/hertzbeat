@@ -70,6 +70,10 @@ export async function loadLocale(locale: SupportedLocale, options: { signal?: Ab
           ...messageGroup(messages.default.exploreTrace),
           ...messageGroup(exploreMessages.default.exploreTrace)
         },
+        exploreInvestigation: {
+          ...messageGroup(messages.default.exploreInvestigation),
+          ...messageGroup(exploreMessages.default.exploreInvestigation)
+        },
         explore: {
           ...messageGroup(messages.default.explore),
           ...messageGroup(exploreMessages.default.explore)

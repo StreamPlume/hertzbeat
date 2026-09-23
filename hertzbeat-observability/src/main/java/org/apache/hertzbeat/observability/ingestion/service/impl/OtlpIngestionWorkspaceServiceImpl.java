@@ -563,6 +563,60 @@ public class OtlpIngestionWorkspaceServiceImpl implements OtlpIngestionWorkspace
             String step,
             String limit,
             String operationName) {
+        return getMetricsConsole(
+                workspaceId, entityId, entityType, start, end, serviceName, serviceNamespace, environment,
+                collectorId, instance, endpoint, query, filter, groupBy, aggregation, temporalAggregation, step, limit,
+                operationName, false);
+    }
+
+    @Override
+    public OtlpMetricsConsoleDto getBoundedMetricsConsole(
+            String workspaceId,
+            Long entityId,
+            String entityType,
+            Long start,
+            Long end,
+            String serviceName,
+            String serviceNamespace,
+            String environment,
+            String collectorId,
+            String instance,
+            String endpoint,
+            String query,
+            String filter,
+            String groupBy,
+            String aggregation,
+            String temporalAggregation,
+            String step,
+            String limit,
+            String operationName) {
+        return getMetricsConsole(
+                workspaceId, entityId, entityType, start, end, serviceName, serviceNamespace, environment,
+                collectorId, instance, endpoint, query, filter, groupBy, aggregation, temporalAggregation, step, limit,
+                operationName, true);
+    }
+
+    private OtlpMetricsConsoleDto getMetricsConsole(
+            String workspaceId,
+            Long entityId,
+            String entityType,
+            Long start,
+            Long end,
+            String serviceName,
+            String serviceNamespace,
+            String environment,
+            String collectorId,
+            String instance,
+            String endpoint,
+            String query,
+            String filter,
+            String groupBy,
+            String aggregation,
+            String temporalAggregation,
+            String step,
+            String limit,
+            String operationName,
+            boolean sourceSeriesLimit) {
         String trustedWorkspaceId = requireMetricsWorkspace(workspaceId);
         long resolvedEnd = end == null || end <= 0 ? System.currentTimeMillis() : end;
         long resolvedStart = start == null || start <= 0 || start >= resolvedEnd
@@ -643,7 +697,7 @@ public class OtlpIngestionWorkspaceServiceImpl implements OtlpIngestionWorkspace
         String lastErrorMessage = null;
         for (String candidateQuery : resolvedQueries) {
             MetricsQueryExecution execution = executeMetricsConsoleQuery(candidateQuery, resolvedStart, resolvedEnd,
-                    resolvedStep, resolvedSeriesLimit);
+                    resolvedStep, resolvedSeriesLimit, sourceSeriesLimit);
             if (execution.errorMessage() != null) {
                 lastErrorMessage = execution.errorMessage();
                 continue;
@@ -2418,13 +2472,21 @@ public class OtlpIngestionWorkspaceServiceImpl implements OtlpIngestionWorkspace
                                                              long resolvedEnd,
                                                              String resolvedStep,
                                                              int resolvedSeriesLimit) {
-        MetricQueryRepository.PromqlRangeQueryResult queryResult = metricQueryRepository.queryPromqlRange(
-                METRICS_CONSOLE_REF_ID,
-                query,
-                resolvedStart,
-                resolvedEnd,
-                resolvedStep
-        );
+        return executeMetricsConsoleQuery(
+                query, resolvedStart, resolvedEnd, resolvedStep, resolvedSeriesLimit, false);
+    }
+
+    private MetricsQueryExecution executeMetricsConsoleQuery(String query,
+                                                             long resolvedStart,
+                                                             long resolvedEnd,
+                                                             String resolvedStep,
+                                                             int resolvedSeriesLimit,
+                                                             boolean sourceSeriesLimit) {
+        MetricQueryRepository.PromqlRangeQueryResult queryResult = sourceSeriesLimit
+                ? metricQueryRepository.queryPromqlRange(
+                        METRICS_CONSOLE_REF_ID, query, resolvedStart, resolvedEnd, resolvedStep, resolvedSeriesLimit)
+                : metricQueryRepository.queryPromqlRange(
+                        METRICS_CONSOLE_REF_ID, query, resolvedStart, resolvedEnd, resolvedStep);
         if (queryResult == null) {
             log.warn(MetricQueryRepository.PROMQL_QUERY_FAILED);
             return new MetricsQueryExecution(
@@ -2443,7 +2505,9 @@ public class OtlpIngestionWorkspaceServiceImpl implements OtlpIngestionWorkspace
                     queryResult.errorMessage()
             );
         }
-        DatasourceQueryData results = limitMetricsConsoleResults(queryResult.results(), resolvedSeriesLimit);
+        DatasourceQueryData results = sourceSeriesLimit
+                ? queryResult.results()
+                : limitMetricsConsoleResults(queryResult.results(), resolvedSeriesLimit);
         return new MetricsQueryExecution(
                 queryResult.datasource(),
                 results,

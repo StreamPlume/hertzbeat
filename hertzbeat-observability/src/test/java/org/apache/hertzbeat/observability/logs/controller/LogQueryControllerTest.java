@@ -18,6 +18,7 @@
 package org.apache.hertzbeat.observability.logs.controller;
 
 import static org.hamcrest.Matchers.aMapWithSize;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -25,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -34,10 +36,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +46,10 @@ import org.apache.hertzbeat.common.constants.CommonConstants;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
 import org.apache.hertzbeat.common.entity.manager.EntityIdentity;
 import org.apache.hertzbeat.common.entity.manager.ObserveEntity;
+import org.apache.hertzbeat.common.observability.dto.investigation.InvestigationReason;
+import org.apache.hertzbeat.common.observability.dto.investigation.InvestigationWindow;
+import org.apache.hertzbeat.common.observability.dto.investigation.LogInvestigationView;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenRequestContext;
 import org.apache.hertzbeat.common.observability.gateway.ObservabilityWorkspaceQueryGateway;
 import org.apache.hertzbeat.observability.logs.service.impl.LogQueryServiceImpl;
@@ -77,14 +79,20 @@ class LogQueryControllerTest {
     @Mock
     private HistoryDataReader secondaryHistoryDataReader;
 
+    @Mock
+    private org.apache.hertzbeat.observability.investigation.service.LogInvestigationReadModelService
+            investigationReadModelService;
+
     private LogQueryController logQueryController;
+    private ObservabilityQueryAdmissionService admissionService;
 
     @BeforeEach
     void setUp() {
         AuthTokenRequestContext.bindWorkspaceId("default");
+        admissionService = org.mockito.Mockito.spy(queryAdmissionService());
         this.logQueryController = new LogQueryController(
                 new LogQueryServiceImpl(List.of(workspaceCompatibleReader(historyDataReader))),
-                queryAdmissionService());
+                admissionService, investigationReadModelService);
         this.mockMvc = MockMvcBuilders.standaloneSetup(logQueryController).build();
     }
 
@@ -149,7 +157,7 @@ class LogQueryControllerTest {
                 .body("Test log message 1")
                 .traceId("trace123")
                 .spanId("span456")
-                .attributes(new HashMap<>())
+                .attributes(new HashMap<>(Map.of("log.record.uid", "event-1")))
                 .build();
 
         LogEntry logEntry2 = LogEntry.builder()
@@ -187,6 +195,9 @@ class LogQueryControllerTest {
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
                 .andExpect(jsonPath("$.data.content").isArray())
                 .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.content[0].logRecordUid").value("event-1"))
+                .andExpect(jsonPath("$.data.content[0].timeUnixNano").value("1734005477630000000"))
+                .andExpect(jsonPath("$.data.content[0].observedTimeUnixNano").doesNotExist())
                 .andExpect(jsonPath("$.data.totalElements").value(2))
                 .andExpect(jsonPath("$.data.pageIndex").value(0))
                 .andExpect(jsonPath("$.data.pageSize").value(20))
@@ -195,6 +206,40 @@ class LogQueryControllerTest {
                 .andExpect(jsonPath("$.data.sort").doesNotExist())
                 .andExpect(jsonPath("$.data.number").doesNotExist())
                 .andExpect(jsonPath("$.data.size").doesNotExist());
+    }
+
+    @Test
+    void rejectsMalformedInvestigationUidBeforeQuery() {
+        assertThrows(Exception.class, () -> mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
+                .param("logRecordUid", "not valid")
+                .param("start", "1000")
+                .param("end", "2000")));
+
+        verifyNoInteractions(investigationReadModelService);
+    }
+
+    @Test
+    void queriesDirectInvestigationWithTrustedWorkspaceAndOneAdmission() throws Exception {
+        LogInvestigationView view = new LogInvestigationView("event-7", new InvestigationWindow(1000, 2000),
+                LogInvestigationView.SelectedLogBlock.empty(),
+                LogInvestigationView.TraceBlock.unavailable(InvestigationReason.UPSTREAM_UNAVAILABLE),
+                LogInvestigationView.MetricsBlock.unavailable(InvestigationReason.QUERY_STRATEGY_UNAVAILABLE),
+                LogInvestigationView.NearbyLogsBlock.unavailable(InvestigationReason.UPSTREAM_UNAVAILABLE));
+        when(investigationReadModelService.query("default", "event-7", 1000, 2000)).thenReturn(view);
+
+        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
+                        .param("logRecordUid", "event-7")
+                        .param("start", "1000")
+                        .param("end", "2000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.logRecordUid").value("event-7"))
+                .andExpect(jsonPath("$.data.window.start").value(1000))
+                .andExpect(jsonPath("$.data.window.end").value(2000))
+                .andExpect(jsonPath("$.data.selectedLog.state").value("empty"))
+                .andExpect(jsonPath("$.data.trace.state").value("unavailable"));
+
+        verify(investigationReadModelService).query("default", "event-7", 1000, 2000);
+        verify(admissionService).execute(eq("logs"), any());
     }
 
     @Test
@@ -328,7 +373,7 @@ class LogQueryControllerTest {
         ObservabilityWorkspaceQueryGateway workspaceQueryGateway = org.mockito.Mockito.mock(ObservabilityWorkspaceQueryGateway.class);
         this.logQueryController = new LogQueryController(
                 new LogQueryServiceImpl(List.of(workspaceCompatibleReader(historyDataReader)),
-                        Optional.of(workspaceQueryGateway)), queryAdmissionService());
+                        Optional.of(workspaceQueryGateway)), queryAdmissionService(), investigationService());
         this.mockMvc = MockMvcBuilders.standaloneSetup(logQueryController).build();
         EntityIdentity serviceName = EntityIdentity.builder()
                 .entityId(42L)
@@ -403,7 +448,7 @@ class LogQueryControllerTest {
         ObservabilityWorkspaceQueryGateway workspaceQueryGateway = org.mockito.Mockito.mock(ObservabilityWorkspaceQueryGateway.class);
         this.logQueryController = new LogQueryController(
                 new LogQueryServiceImpl(List.of(workspaceCompatibleReader(historyDataReader)),
-                        Optional.of(workspaceQueryGateway)), queryAdmissionService());
+                        Optional.of(workspaceQueryGateway)), queryAdmissionService(), investigationService());
         this.mockMvc = MockMvcBuilders.standaloneSetup(logQueryController).build();
         when(workspaceQueryGateway.findEntityById("default", 42L)).thenReturn(Optional.of(ObserveEntity.builder()
                 .id(42L)
@@ -652,80 +697,6 @@ class LogQueryControllerTest {
     }
 
     @Test
-    void testLogContextPrefersEntityIdentityOverConflictingRouteContext() throws Exception {
-        ObservabilityWorkspaceQueryGateway workspaceQueryGateway = org.mockito.Mockito.mock(ObservabilityWorkspaceQueryGateway.class);
-        this.logQueryController = new LogQueryController(
-                new LogQueryServiceImpl(List.of(workspaceCompatibleReader(historyDataReader)),
-                        Optional.of(workspaceQueryGateway)), queryAdmissionService());
-        this.mockMvc = MockMvcBuilders.standaloneSetup(logQueryController).build();
-        when(workspaceQueryGateway.findEntityById("default", 42L)).thenReturn(Optional.of(ObserveEntity.builder()
-                .id(42L)
-                .type("service")
-                .name("checkout")
-                .namespace("payments")
-                .environment("prod")
-                .build()));
-        when(workspaceQueryGateway.findIdentitiesByEntityId("default", 42L)).thenReturn(List.of(
-                EntityIdentity.builder()
-                        .entityId(42L)
-                        .identityKey("service.name")
-                        .identityValue("checkout")
-                        .primaryIdentity(true)
-                        .priority(90)
-                        .build(),
-                EntityIdentity.builder()
-                        .entityId(42L)
-                        .identityKey("service.namespace")
-                        .identityValue("payments")
-                        .priority(30)
-                        .build(),
-                EntityIdentity.builder()
-                        .entityId(42L)
-                        .identityKey("deployment.environment.name")
-                        .identityValue("prod")
-                        .priority(20)
-                        .build()
-        ));
-        long selectedTime = 1734005477630000000L;
-        LogEntry selectedLog = LogEntry.builder()
-                .timeUnixNano(selectedTime)
-                .severityText("INFO")
-                .body("checkout selected")
-                .resource(new HashMap<>(Map.of(
-                        "service.name", "checkout",
-                        "service.namespace", "payments",
-                        "deployment.environment.name", "prod",
-                        "service.version", "1.2.3",
-                        "hertzbeat.entity_id", "42")))
-                .attributes(new HashMap<>(Map.of("http.route", "/checkout")))
-                .build();
-        Map<String, String> expectedResourceFilters = Map.of(
-                "service.version", "1.2.3",
-                "hertzbeat.entity_id", "42");
-        Map<String, String> expectedAttributeFilters = Map.of("http.route", "/checkout");
-        when(historyDataReader.queryLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
-                anySet(), eq(false), eq("default"), eq("checkout"), eq("payments"), eq("prod"),
-                eq(expectedResourceFilters), eq(expectedAttributeFilters)))
-                .thenReturn(List.of(selectedLog));
-
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
-                        .param("entityId", "42")
-                        .param("logTimeUnixNano", String.valueOf(selectedTime))
-                        .param("serviceName", "billing")
-                        .param("serviceNamespace", "wrong-namespace")
-                        .param("environment", "staging")
-                        .param("resourceFilter", "service.name=billing,deployment.environment.name=staging,service.version=1.2.3")
-                        .param("attributeFilter", "http.route:/checkout"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.selected.body").value("checkout selected"));
-
-        verify(historyDataReader).queryLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
-                anySet(), eq(false), eq("default"), eq("checkout"), eq("payments"), eq("prod"),
-                eq(expectedResourceFilters), eq(expectedAttributeFilters));
-    }
-
-    @Test
     void testListLogsHideInternalFiltersCollectorNoise() throws Exception {
         LogEntry internalLog = LogEntry.builder()
                 .timeUnixNano(1734005477630000000L)
@@ -739,8 +710,8 @@ class LogQueryControllerTest {
                 .severityNumber(17)
                 .severityText("ERROR")
                 .body("checkout log")
-                .traceId("trace-checkout")
-                .spanId("span-checkout")
+                .traceId("0123456789abcdef0123456789abcdef")
+                .spanId("0123456789abcdef")
                 .resource(new HashMap<>(java.util.Map.of("service.name", "checkout")))
                 .build();
 
@@ -759,8 +730,9 @@ class LogQueryControllerTest {
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
                 .andExpect(jsonPath("$.data.content.length()").value(1))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
-                .andExpect(jsonPath("$.data.content[0].traceId").value("trace-checkout"))
-                .andExpect(jsonPath("$.data.content[0].spanId").value("span-checkout"));
+                .andExpect(jsonPath("$.data.content[0].traceId")
+                        .value("0123456789abcdef0123456789abcdef"))
+                .andExpect(jsonPath("$.data.content[0].spanId").value("0123456789abcdef"));
         verify(historyDataReader, never()).queryLogsByMultipleConditions(any(), any(), any(),
                 any(), any(), any(), any());
     }
@@ -786,8 +758,8 @@ class LogQueryControllerTest {
                 .severityNumber(17)
                 .severityText("ERROR")
                 .body("checkout log")
-                .traceId("trace-checkout")
-                .spanId("span-checkout")
+                .traceId("0123456789abcdef0123456789abcdef")
+                .spanId("0123456789abcdef")
                 .resource(new HashMap<>(java.util.Map.of("service.name", "checkout")))
                 .build();
 
@@ -807,8 +779,9 @@ class LogQueryControllerTest {
                 .andExpect(jsonPath("$.data.content.length()").value(1))
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.content[0].resource['service.name']").value("checkout"))
-                .andExpect(jsonPath("$.data.content[0].traceId").value("trace-checkout"))
-                .andExpect(jsonPath("$.data.content[0].spanId").value("span-checkout"));
+                .andExpect(jsonPath("$.data.content[0].traceId")
+                        .value("0123456789abcdef0123456789abcdef"))
+                .andExpect(jsonPath("$.data.content[0].spanId").value("0123456789abcdef"));
         verify(historyDataReader, never()).queryLogsByMultipleConditions(any(), any(), any(),
                 any(), any(), any(), any());
     }
@@ -1082,267 +1055,6 @@ class LogQueryControllerTest {
     }
 
     @Test
-    void testContextLogsReturnsSelectedLogWithBoundedBeforeAndAfterRows() throws Exception {
-        long selectedTime = 1734005477630000000L;
-        LogEntry olderClosestLog = LogEntry.builder()
-                .timeUnixNano(selectedTime - 1_000_000L)
-                .severityText("INFO")
-                .body("checkout older closest")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry olderFarLog = LogEntry.builder()
-                .timeUnixNano(selectedTime - 2_000_000L)
-                .severityText("INFO")
-                .body("checkout older far")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry selectedLog = LogEntry.builder()
-                .timeUnixNano(selectedTime)
-                .severityText("ERROR")
-                .body("checkout selected")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry newerClosestLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 1_000_000L)
-                .severityText("WARN")
-                .body("checkout newer closest")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry newerFarLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 2_000_000L)
-                .severityText("INFO")
-                .body("checkout newer far")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry otherServiceLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 500_000L)
-                .severityText("INFO")
-                .body("payment neighboring log")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "payment",
-                        "deployment.environment.name", "prod")))
-                .build();
-
-        when(historyDataReader.queryLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
-                anySet(), eq(false), any(), eq("checkout"), any(), eq("prod")))
-                .thenReturn(List.of(newerFarLog, newerClosestLog, otherServiceLog, selectedLog, olderClosestLog, olderFarLog));
-
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
-                        .param("logTimeUnixNano", String.valueOf(selectedTime))
-                        .param("serviceName", "checkout")
-                        .param("environment", "prod")
-                        .param("limit", "1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.targetTimeUnixNano").value(selectedTime))
-                .andExpect(jsonPath("$.data.limit").value(1))
-                .andExpect(jsonPath("$.data.before.length()").value(1))
-                .andExpect(jsonPath("$.data.before[0].body").value("checkout older closest"))
-                .andExpect(jsonPath("$.data.selected.body").value("checkout selected"))
-                .andExpect(jsonPath("$.data.after.length()").value(1))
-                .andExpect(jsonPath("$.data.after[0].body").value("checkout newer closest"))
-                .andExpect(jsonPath("$.data.hasMoreBefore").value(true))
-                .andExpect(jsonPath("$.data.hasMoreAfter").value(true));
-    }
-
-    @Test
-    void testContextLogsAppliesInAndNotInFiltersWithRowFallback() throws Exception {
-        long selectedTime = 1734005477630000000L;
-        LogEntry selectedLog = LogEntry.builder()
-                .timeUnixNano(selectedTime)
-                .severityText("ERROR")
-                .body("stable checkout selected")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "service.version", "1.2.3",
-                        "host.name", "checkout-1")))
-                .attributes(new HashMap<>(java.util.Map.of("http.route", "/checkout")))
-                .build();
-        LogEntry beforeLog = LogEntry.builder()
-                .timeUnixNano(selectedTime - 1_000_000L)
-                .severityText("INFO")
-                .body("stable checkout before")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "service.version", "1.2.4",
-                        "host.name", "checkout-2")))
-                .attributes(new HashMap<>(java.util.Map.of("http.route", "/checkout")))
-                .build();
-        LogEntry canaryLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 1_000_000L)
-                .severityText("INFO")
-                .body("canary checkout after")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "service.version", "1.2.3",
-                        "host.name", "checkout-canary")))
-                .attributes(new HashMap<>(java.util.Map.of("http.route", "/checkout")))
-                .build();
-        LogEntry cartLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 2_000_000L)
-                .severityText("INFO")
-                .body("cart checkout after")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "service.version", "1.2.4",
-                        "host.name", "checkout-3")))
-                .attributes(new HashMap<>(java.util.Map.of("http.route", "/cart")))
-                .build();
-        when(historyDataReader.queryLogsByMultipleConditions(any(), any(), any(),
-                any(), any(), any(), any())).thenReturn(List.of(cartLog, canaryLog, selectedLog, beforeLog));
-
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
-                        .param("logTimeUnixNano", String.valueOf(selectedTime))
-                        .param("resourceFilter", "service.version IN ('1.2.3', '1.2.4') "
-                                + "and host.name NOT IN ('checkout-canary')")
-                        .param("attributeFilter", "http.route IN ('/checkout')")
-                        .param("limit", "1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.before.length()").value(1))
-                .andExpect(jsonPath("$.data.before[0].body").value("stable checkout before"))
-                .andExpect(jsonPath("$.data.selected.body").value("stable checkout selected"))
-                .andExpect(jsonPath("$.data.after.length()").value(0));
-
-        verify(historyDataReader).queryLogsByMultipleConditions(any(), any(), any(),
-                any(), any(), any(), any());
-        verify(historyDataReader, never()).queryLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
-                anySet(), eq(false), any(), any(), any(), any(),
-                org.mockito.ArgumentMatchers.<Map<String, String>>any(),
-                org.mockito.ArgumentMatchers.<Map<String, String>>any());
-    }
-
-    @Test
-    void testContextLogsReturnsDirectionalRowsAfterCursor() throws Exception {
-        long selectedTime = 1734005477630000000L;
-        long cursorTime = selectedTime + 1_000_000L;
-        LogEntry selectedLog = LogEntry.builder()
-                .timeUnixNano(selectedTime)
-                .severityText("ERROR")
-                .body("checkout selected")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry newerCursorLog = LogEntry.builder()
-                .timeUnixNano(cursorTime)
-                .severityText("WARN")
-                .body("checkout newer cursor")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry newerNextLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 2_000_000L)
-                .severityText("INFO")
-                .body("checkout newer next")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry newerFarLog = LogEntry.builder()
-                .timeUnixNano(selectedTime + 3_000_000L)
-                .severityText("INFO")
-                .body("checkout newer far")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-
-        when(historyDataReader.queryLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
-                anySet(), eq(false), any(), eq("checkout"), any(), eq("prod")))
-                .thenReturn(List.of(newerFarLog, newerNextLog, newerCursorLog, selectedLog));
-
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
-                        .param("logTimeUnixNano", String.valueOf(selectedTime))
-                        .param("direction", "after")
-                        .param("cursorLogTimeUnixNano", String.valueOf(cursorTime))
-                        .param("serviceName", "checkout")
-                        .param("environment", "prod")
-                        .param("limit", "1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.direction").value("after"))
-                .andExpect(jsonPath("$.data.cursorLogTimeUnixNano").value(cursorTime))
-                .andExpect(jsonPath("$.data.before.length()").value(0))
-                .andExpect(jsonPath("$.data.selected").doesNotExist())
-                .andExpect(jsonPath("$.data.after.length()").value(1))
-                .andExpect(jsonPath("$.data.after[0].body").value("checkout newer next"))
-                .andExpect(jsonPath("$.data.hasMoreBefore").value(false))
-                .andExpect(jsonPath("$.data.hasMoreAfter").value(true));
-    }
-
-    @Test
-    void testContextLogsReturnsDirectionalRowsBeforeCursor() throws Exception {
-        long selectedTime = 1734005477630000000L;
-        long cursorTime = selectedTime - 1_000_000L;
-        LogEntry selectedLog = LogEntry.builder()
-                .timeUnixNano(selectedTime)
-                .severityText("ERROR")
-                .body("checkout selected")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry olderFarLog = LogEntry.builder()
-                .timeUnixNano(selectedTime - 3_000_000L)
-                .severityText("INFO")
-                .body("checkout older far")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry olderNextLog = LogEntry.builder()
-                .timeUnixNano(selectedTime - 2_000_000L)
-                .severityText("INFO")
-                .body("checkout older next")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-        LogEntry olderCursorLog = LogEntry.builder()
-                .timeUnixNano(cursorTime)
-                .severityText("WARN")
-                .body("checkout older cursor")
-                .resource(new HashMap<>(java.util.Map.of(
-                        "service.name", "checkout",
-                        "deployment.environment.name", "prod")))
-                .build();
-
-        when(historyDataReader.queryLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
-                anySet(), eq(false), any(), eq("checkout"), any(), eq("prod")))
-                .thenReturn(List.of(selectedLog, olderCursorLog, olderNextLog, olderFarLog));
-
-        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/context")
-                        .param("logTimeUnixNano", String.valueOf(selectedTime))
-                        .param("direction", "before")
-                        .param("cursorLogTimeUnixNano", String.valueOf(cursorTime))
-                        .param("serviceName", "checkout")
-                        .param("environment", "prod")
-                        .param("limit", "1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.direction").value("before"))
-                .andExpect(jsonPath("$.data.cursorLogTimeUnixNano").value(cursorTime))
-                .andExpect(jsonPath("$.data.before.length()").value(1))
-                .andExpect(jsonPath("$.data.before[0].body").value("checkout older next"))
-                .andExpect(jsonPath("$.data.selected").doesNotExist())
-                .andExpect(jsonPath("$.data.after.length()").value(0))
-                .andExpect(jsonPath("$.data.hasMoreBefore").value(true))
-                .andExpect(jsonPath("$.data.hasMoreAfter").value(false));
-    }
-
-    @Test
     void testListLogsDoesNotLeakUnscopedTotalWhenWorkspacePageAlreadyMatches() throws Exception {
         LogEntry teamAlphaLog = LogEntry.builder()
                 .timeUnixNano(1734005477630000000L)
@@ -1523,7 +1235,8 @@ class LogQueryControllerTest {
         MockMvc fallbackMockMvc = MockMvcBuilders
                 .standaloneSetup(new LogQueryController(new LogQueryServiceImpl(List.of(
                         workspaceCompatibleReader(historyDataReader),
-                        workspaceCompatibleReader(secondaryHistoryDataReader))), queryAdmissionService()))
+                        workspaceCompatibleReader(secondaryHistoryDataReader))), queryAdmissionService(),
+                        investigationService()))
                 .build();
 
         when(historyDataReader.countLogsByMultipleConditions(any(), any(), any(), any(), any(), any(), any(),
@@ -1720,15 +1433,13 @@ class LogQueryControllerTest {
     }
 
     @Test
-    void testTrendStats() throws Exception {
-        // Create logs with timestamps that fall into different hours
+    void testTrendStatsUsesTheSmallestAdaptiveIntervalWithinSixtyBuckets() throws Exception {
+        long start = 1_734_005_460_000L;
+        long end = start + 30 * 60_000L;
         List<LogEntry> mockLogs = Arrays.asList(
-                // 2023-12-12 10:00 (1734005477630000000L nano = 1734005477630L ms)
-                LogEntry.builder().timeUnixNano(1734005477630000000L).build(),
-                // Same hour
-                LogEntry.builder().timeUnixNano(1734005477640000000L).build(),
-                // Next hour: 2023-12-12 11:00 (1734009077630000000L nano = 1734009077630L ms)
-                LogEntry.builder().timeUnixNano(1734009077630000000L).build()
+                LogEntry.builder().timeUnixNano((start + 17_000L) * 1_000_000L).build(),
+                LogEntry.builder().timeUnixNano((start + 47_000L) * 1_000_000L).build(),
+                LogEntry.builder().timeUnixNano((start + 77_000L) * 1_000_000L).build()
         );
 
         when(historyDataReader.queryLogsByMultipleConditions(any(), any(), any(),
@@ -1737,16 +1448,26 @@ class LogQueryControllerTest {
         mockMvc.perform(
                 MockMvcRequestBuilders
                         .get("/api/logs/stats/trend")
+                        .param("start", String.valueOf(start))
+                        .param("end", String.valueOf(end))
         )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.hourlyStats").isMap());
+                .andExpect(jsonPath("$.data.start").value(start))
+                .andExpect(jsonPath("$.data.end").value(end))
+                .andExpect(jsonPath("$.data.intervalMs").value(60_000L))
+                .andExpect(jsonPath("$.data.buckets.length()").value(2))
+                .andExpect(jsonPath("$.data.buckets[0].start").value(start))
+                .andExpect(jsonPath("$.data.buckets[0].count").value(2))
+                .andExpect(jsonPath("$.data.buckets[1].start").value(start + 60_000L))
+                .andExpect(jsonPath("$.data.buckets[1].count").value(1));
     }
 
     @Test
     void testTrendStatsWithNullTimestamp() throws Exception {
+        long currentBucket = Math.floorDiv(System.currentTimeMillis(), 60_000L) * 60_000L;
         List<LogEntry> mockLogs = Arrays.asList(
-                LogEntry.builder().timeUnixNano(1734005477630000000L).build(),
+                LogEntry.builder().timeUnixNano(currentBucket * 1_000_000L).build(),
                 LogEntry.builder().timeUnixNano(null).build() // This should be filtered out
         );
 
@@ -1759,16 +1480,15 @@ class LogQueryControllerTest {
         )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.hourlyStats").isMap());
+                .andExpect(jsonPath("$.data.intervalMs").value(60_000L))
+                .andExpect(jsonPath("$.data.buckets.length()").value(1));
     }
 
     @Test
     void testTrendStatsAppliesInAndNotInFiltersWithRowFallback() throws Exception {
         long bucketTimeUnixNano = 1734005477630000000L;
-        String bucketKey = LocalDateTime.ofInstant(
-                        Instant.ofEpochMilli(bucketTimeUnixNano / 1_000_000L),
-                        ZoneId.systemDefault())
-                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:00"));
+        long timestampMs = bucketTimeUnixNano / 1_000_000L;
+        long bucketStart = Math.floorDiv(timestampMs, 60_000L) * 60_000L;
         LogEntry stableLog = LogEntry.builder()
                 .timeUnixNano(bucketTimeUnixNano)
                 .severityText("INFO")
@@ -1813,17 +1533,21 @@ class LogQueryControllerTest {
                 any(), any(), any(), any())).thenReturn(List.of(stableLog, secondStableLog, canaryLog, cartLog));
 
         mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/stats/trend")
+                        .param("start", String.valueOf(bucketStart))
+                        .param("end", String.valueOf(bucketStart + 30 * 60_000L))
                         .param("resourceFilter", "service.version IN ('1.2.3', '1.2.4') "
                                 + "and host.name NOT IN ('checkout-canary')")
                         .param("attributeFilter", "http.route IN ('/checkout')"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.hourlyStats.length()").value(1))
-                .andExpect(jsonPath("$.data.hourlyStats['" + bucketKey + "']").value(2));
+                .andExpect(jsonPath("$.data.intervalMs").value(60_000L))
+                .andExpect(jsonPath("$.data.buckets.length()").value(1))
+                .andExpect(jsonPath("$.data.buckets[0].start").value(bucketStart))
+                .andExpect(jsonPath("$.data.buckets[0].count").value(2));
 
         verify(historyDataReader).queryLogsByMultipleConditions(any(), any(), any(),
                 any(), any(), any(), any());
-        verify(historyDataReader, never()).countLogsByHour(any(), any(), any(), any(), any(), any(), any(),
+        verify(historyDataReader, never()).countLogsByInterval(any(), any(), anyLong(), any(), any(), any(), any(), any(),
                 anySet(), eq(false), any(), any(), any(), any(),
                 org.mockito.ArgumentMatchers.<Map<String, String>>any(),
                 org.mockito.ArgumentMatchers.<Map<String, String>>any());
@@ -1831,31 +1555,47 @@ class LogQueryControllerTest {
 
     @Test
     void testTrendStatsUsesStorageAggregateWhenAvailable() throws Exception {
-        when(historyDataReader.countLogsByHour(any(), any(), any(), any(),
-                any(), any(), any(), anySet(), eq(false)))
-                .thenReturn(java.util.Map.of("2026-04-29 21:00", 12L));
+        long currentBucket = Math.floorDiv(System.currentTimeMillis(), 60_000L) * 60_000L;
+        when(historyDataReader.countLogsByInterval(any(), any(), anyLong(), any(), any(), any(), any(),
+                any(), anySet(), eq(false)))
+                .thenReturn(List.of(new LogTrendBucket(currentBucket, 12L)));
 
         mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/stats/trend"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.hourlyStats['2026-04-29 21:00']").value(12));
+                .andExpect(jsonPath("$.data.buckets[0].start").value(currentBucket))
+                .andExpect(jsonPath("$.data.buckets[0].count").value(12));
         verify(historyDataReader, never()).queryLogsByMultipleConditions(any(), any(), any(),
                 any(), any(), any(), any());
     }
 
     @Test
+    void testTrendStatsRejectsWindowBeyondSupportedSixtyBuckets() throws Exception {
+        long start = 1_728_000_000_000L;
+
+        mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/stats/trend")
+                        .param("start", String.valueOf(start))
+                        .param("end", String.valueOf(start + 60 * 86_400_000L)))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(historyDataReader);
+    }
+
+    @Test
     void testTrendStatsPushesWorkspaceAggregateIntoStorageWhenSupported() throws Exception {
         AuthTokenRequestContext.bindWorkspaceId("team-a");
-        when(historyDataReader.countLogsByHour(any(), any(), any(), any(), any(), any(), any(),
+        long currentBucket = Math.floorDiv(System.currentTimeMillis(), 60_000L) * 60_000L;
+        when(historyDataReader.countLogsByInterval(any(), any(), anyLong(), any(), any(), any(), any(), any(),
                 anySet(), eq(false), eq("team-a")))
-                .thenReturn(java.util.Map.of("2026-04-29 21:00", 12L));
+                .thenReturn(List.of(new LogTrendBucket(currentBucket, 12L)));
 
         mockMvc.perform(MockMvcRequestBuilders.get("/api/logs/stats/trend"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.hourlyStats['2026-04-29 21:00']").value(12));
+                .andExpect(jsonPath("$.data.buckets[0].start").value(currentBucket))
+                .andExpect(jsonPath("$.data.buckets[0].count").value(12));
 
-        verify(historyDataReader).countLogsByHour(any(), any(), any(), any(), any(), any(), any(),
+        verify(historyDataReader).countLogsByInterval(any(), any(), anyLong(), any(), any(), any(), any(), any(),
                 anySet(), eq(false), eq("team-a"));
         verify(historyDataReader, never()).queryLogsByMultipleConditions(any(), any(), any(),
                 any(), any(), any(), any());
@@ -1963,5 +1703,11 @@ class LogQueryControllerTest {
 
     private ObservabilityQueryAdmissionService queryAdmissionService() {
         return new ObservabilityQueryAdmissionService(8, 8, 8, 4, 8, Duration.ofMillis(100));
+    }
+
+    private static org.apache.hertzbeat.observability.investigation.service.LogInvestigationReadModelService
+            investigationService() {
+        return org.mockito.Mockito.mock(
+                org.apache.hertzbeat.observability.investigation.service.LogInvestigationReadModelService.class);
     }
 }

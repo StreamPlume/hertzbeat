@@ -18,6 +18,12 @@ export type TopologyFocusPathOptions = {
   returnTo?: string | null | undefined;
 };
 
+export type TopologyInvestigationPathOptions = {
+  entityId: number;
+  environment?: string | undefined;
+  window: ExactTimeWindow;
+};
+
 export function buildTopologyEntityPath(entityId: number, returnTo: string) {
   return buildEntityDetailPath(entityId, safeTopologyReturnTo(returnTo));
 }
@@ -34,6 +40,17 @@ export function buildTopologyFocusPath({ entityId, environment, returnTo }: Topo
     depth: 2,
     ...(environment ? { environment } : {}),
     sourceKind: entityRelationTopologySource
+  });
+  return `${applicationRoutePaths.topology}?${query.toString()}`;
+}
+
+export function buildTopologyInvestigationPath({ entityId, environment, window }: TopologyInvestigationPathOptions) {
+  const query = writeTopologyQuery({
+    focusEntityId: entityId,
+    depth: 1,
+    sourceKind: 'otel',
+    window,
+    ...(environment ? { environment } : {})
   });
   return `${applicationRoutePaths.topology}?${query.toString()}`;
 }

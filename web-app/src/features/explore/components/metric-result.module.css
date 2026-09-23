@@ -20,40 +20,9 @@
   border-bottom: 1px solid var(--ant-color-border-secondary);
 }
 
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-  min-height: 28px;
-  font-size: 12px;
-}
-
-.legend span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.legend i {
-  width: 16px;
-  height: 3px;
-}
-
 .chart {
   display: block;
   width: 100%;
-  height: 240px;
-  overflow: visible;
-}
-
-.chart line {
-  stroke: var(--ant-color-border-secondary);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.chart path {
-  fill: none;
-  stroke-width: 1.75;
-  vector-effect: non-scaling-stroke;
+  height: 280px;
+  overflow: hidden;
 }

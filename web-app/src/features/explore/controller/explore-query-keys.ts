@@ -15,24 +15,36 @@
  * limitations under the License.
  */
 
-import { scopedQueryKey, type ExactTimeWindow } from '@/shared/query-context';
+import { scopedQueryKey, type ExactTimeWindow, type QueryContext } from '@/shared/query-context';
 
-import { exploreQueryContext, type ExploreQuery } from '../model/explore-model';
+import { exploreQueryContext, exploreUsesExactWindow, type ExploreQuery } from '../model/explore-model';
 
 const historyRootKey = ['explore-history'] as const;
 
 export const exploreQueryKeys = {
-  detail: (scopeKey: string, traceId: string | undefined) => ['trace-detail', scopeKey, traceId] as const,
+  traceInvestigation: (
+    context: QueryContext,
+    window: ExactTimeWindow,
+    traceId: string,
+    spanId: string | undefined,
+    refreshRevision: number
+  ) =>
+    [
+      ...scopedQueryKey(['explore-investigation', 'trace'], context, window, refreshRevision),
+      { traceId, spanId }
+    ] as const,
+  logInvestigation: (context: QueryContext, window: ExactTimeWindow, logRecordUid: string, refreshRevision: number) =>
+    [...scopedQueryKey(['explore-investigation', 'log'], context, window, refreshRevision), { logRecordUid }] as const,
   history: (query: ExploreQuery, window: ExactTimeWindow | undefined, refreshRevision: number) =>
     [
       ...scopedQueryKey(historyRootKey, exploreQueryContext(query), window, refreshRevision),
-      ...historyRequestIdentity(query, window)
+      ...historyRequestIdentity(query)
     ] as const
 };
 
-function historyRequestIdentity(query: ExploreQuery, window: ExactTimeWindow | undefined) {
+function historyRequestIdentity(query: ExploreQuery) {
   // An exact window owns the request timestamps; the route preset matters only for a relative request.
-  const relativeTimeRange = window ? undefined : query.timeRange;
+  const relativeTimeRange = exploreUsesExactWindow(query) ? undefined : query.timeRange;
   if (query.signal === 'metrics')
     return [
       'metrics',

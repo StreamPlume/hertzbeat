@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@perses-dev/logs-table-plugin@0.3.0': patches/@perses-dev__logs-table-plugin@0.3.0.patch

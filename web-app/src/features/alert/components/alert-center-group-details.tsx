@@ -20,6 +20,7 @@ import {
   DesktopOutlined,
   FileTextOutlined,
   LineChartOutlined,
+  RobotOutlined,
   SearchOutlined
 } from '@ant-design/icons';
 import { Button, Collapse, Descriptions, Divider, Space, Tag, Typography } from 'antd';
@@ -31,6 +32,7 @@ import { buildAgentWorkspacePath } from '@/features/ai-workspace';
 import styles from '../shared/alert-center.module.css';
 import { alertResourceHandoffs, type AlertResourceHandoff } from '../model/alert-resource-handoff';
 import { alertTelemetryHandoffs, type AlertTelemetryHandoff } from '../model/alert-telemetry-handoff';
+import { buildAlertInvestigationPath } from '../model/alert-investigation-route';
 import type { AlertRecord } from '../model/alert-model';
 
 type AlertCenterGroupDetailsProps = {
@@ -58,48 +60,9 @@ function buildAlertItem(alert: AlertRecord, t: (key: string) => string): NonNull
 
 function AlertRecordEvidence({ alert, t }: { alert: AlertRecord; t: (key: string) => string }) {
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  const resourceHandoffs = alertResourceHandoffs(alert, returnTo);
-  const telemetryHandoffs = alertTelemetryHandoffs(alert);
   return (
     <div className={styles.alertRecordEvidence}>
-      <div className={styles.diagnosticActions} role="group" aria-label={t('alert.diagnosticActions')}>
-        <Button
-          className={styles.diagnosticPrimary ?? ''}
-          href={buildAgentWorkspacePath({ alertId: alert.id, alertType: 'single' }, returnTo)}
-          icon={<SearchOutlined aria-hidden="true" />}
-          size="small"
-          type="text"
-        >
-          {t('alert.investigate')}
-        </Button>
-        {resourceHandoffs.length + telemetryHandoffs.length > 0 ? (
-          <Divider className={styles.diagnosticDivider ?? ''} type="vertical" />
-        ) : null}
-        {resourceHandoffs.map(handoff => (
-          <Button
-            className={styles.diagnosticSecondary ?? ''}
-            href={handoff.path}
-            icon={resourceIcon(handoff.resource)}
-            key={handoff.resource}
-            size="small"
-            type="text"
-          >
-            {t(handoff.resource === 'monitor' ? 'alert.openMonitor' : 'alert.openEntity')}
-          </Button>
-        ))}
-        {telemetryHandoffs.map(handoff => (
-          <Button
-            className={styles.diagnosticSecondary ?? ''}
-            href={handoff.path}
-            icon={telemetryIcon(handoff.signal)}
-            key={handoff.signal}
-            size="small"
-            type="text"
-          >
-            {t(`explore.signals.${handoff.signal}`)}
-          </Button>
-        ))}
-      </div>
+      <AlertDiagnosticActions alert={alert} returnTo={returnTo} t={t} />
       <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 3 }}>
         <Descriptions.Item label={t('alert.details.triggerTimes')}>{alert.triggerTimes ?? '—'}</Descriptions.Item>
         <Descriptions.Item label={t('alert.details.startAt')}>{formatTimestamp(alert.startAt)}</Descriptions.Item>
@@ -111,6 +74,80 @@ function AlertRecordEvidence({ alert, t }: { alert: AlertRecord; t: (key: string
     </div>
   );
 }
+
+function AlertDiagnosticActions({ alert, returnTo, t }: { alert: AlertRecord; returnTo: string; t: Translate }) {
+  const resourceHandoffs = alertResourceHandoffs(alert, returnTo);
+  const telemetryHandoffs = alertTelemetryHandoffs(alert);
+  const investigationPath = buildAlertInvestigationPath(
+    alert,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    returnTo
+  );
+  return (
+    <div className={styles.diagnosticActions} role="group" aria-label={t('alert.diagnosticActions')}>
+      {investigationPath ? (
+        <Button
+          aria-label={`${t('alert.investigate')}: ${alert.labels?.alertname ?? `#${alert.id}`}`}
+          className={styles.diagnosticPrimary ?? ''}
+          href={investigationPath}
+          icon={<SearchOutlined aria-hidden="true" />}
+          size="small"
+          type="text"
+        >
+          {t('alert.investigate')}
+        </Button>
+      ) : null}
+      <Button
+        className={styles.diagnosticSecondary ?? ''}
+        href={buildAgentWorkspacePath({ alertId: alert.id, alertType: 'single' }, returnTo)}
+        icon={<RobotOutlined aria-hidden="true" />}
+        size="small"
+        type="text"
+      >
+        {t('alert.askAi')}
+      </Button>
+      {resourceHandoffs.length + telemetryHandoffs.length > 0 ? (
+        <Divider className={styles.diagnosticDivider ?? ''} type="vertical" />
+      ) : null}
+      {resourceHandoffs.map(handoff => (
+        <ResourceHandoffButton handoff={handoff} key={handoff.resource} t={t} />
+      ))}
+      {telemetryHandoffs.map(handoff => (
+        <TelemetryHandoffButton handoff={handoff} key={handoff.signal} t={t} />
+      ))}
+    </div>
+  );
+}
+
+function ResourceHandoffButton({ handoff, t }: { handoff: AlertResourceHandoff; t: Translate }) {
+  return (
+    <Button
+      className={styles.diagnosticSecondary ?? ''}
+      href={handoff.path}
+      icon={resourceIcon(handoff.resource)}
+      size="small"
+      type="text"
+    >
+      {t(handoff.resource === 'monitor' ? 'alert.openMonitor' : 'alert.openEntity')}
+    </Button>
+  );
+}
+
+function TelemetryHandoffButton({ handoff, t }: { handoff: AlertTelemetryHandoff; t: Translate }) {
+  return (
+    <Button
+      className={styles.diagnosticSecondary ?? ''}
+      href={handoff.path}
+      icon={telemetryIcon(handoff.signal)}
+      size="small"
+      type="text"
+    >
+      {t(`explore.signals.${handoff.signal}`)}
+    </Button>
+  );
+}
+
+type Translate = (key: string) => string;
 
 function resourceIcon(resource: AlertResourceHandoff['resource']) {
   return resource === 'monitor' ? <DesktopOutlined aria-hidden="true" /> : <ClusterOutlined aria-hidden="true" />;

@@ -17,6 +17,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
+import type { ReactNode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { i18n, initializeI18n, loadLocale } from '@/core/i18n/i18n';
@@ -81,6 +82,22 @@ describe('MonitorDetailView', () => {
     expect(screen.getByText('checkout')).toBeInTheDocument();
     expect(screen.queryByText(i18n.t('monitor.metadata.interval', { seconds: 0 }))).not.toBeInTheDocument();
     expect(screen.getByTestId('metrics')).toHaveTextContent('1');
+  });
+
+  it('keeps native Metrics and separated signal evidence before Grafana', () => {
+    renderView(
+      { ...ready, detail: { ...ready.detail, grafanaDashboard: grafana(true, 'https://grafana.example/d/ops') } },
+      {
+        metricWorkbench: <output data-testid="native-metrics">metrics</output>,
+        signalView: <output data-testid="signal-view">signals</output>
+      }
+    );
+
+    const metrics = screen.getByTestId('native-metrics');
+    const signals = screen.getByTestId('signal-view');
+    const dashboardFrame = screen.getByTitle(i18n.t('monitor.grafana.title'));
+    expect(metrics.compareDocumentPosition(signals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(signals.compareDocumentPosition(dashboardFrame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('preserves the established monitor identity, schedule, labels, annotations, and audit timestamps', () => {
@@ -288,6 +305,8 @@ function renderView(
     deleteGrafanaDashboard?: () => Promise<void>;
     grafanaDeleteError?: boolean;
     refresh?: () => void;
+    metricWorkbench?: ReactNode;
+    signalView?: ReactNode;
   } = {}
 ) {
   return render(monitorDetailViewNode(detail, overrides));
@@ -301,6 +320,8 @@ function monitorDetailViewNode(
     deleteGrafanaDashboard?: () => Promise<void>;
     grafanaDeleteError?: boolean;
     refresh?: () => void;
+    metricWorkbench?: ReactNode;
+    signalView?: ReactNode;
   } = {}
 ) {
   return (
@@ -321,10 +342,12 @@ function monitorDetailViewNode(
           deleteGrafanaDashboard: overrides.deleteGrafanaDashboard ?? vi.fn()
         }}
         metricWorkbench={
-          detail.kind === 'ready' ? (
+          overrides.metricWorkbench ??
+          (detail.kind === 'ready' ? (
             <output data-testid="metrics">{detail.detail.metrics?.length ?? 0}</output>
-          ) : undefined
+          ) : undefined)
         }
+        signalView={overrides.signalView}
       />
     </I18nextProvider>
   );

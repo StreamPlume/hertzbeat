@@ -1132,6 +1132,27 @@ class OtlpIngestionWorkspaceServiceImplTest {
     }
 
     @Test
+    void boundedMetricsConsolePushesTheSeriesLimitToTheQueryRepository() {
+        DatasourceQueryData oversizedQueryData = new DatasourceQueryData(
+                "otlp-metrics-console", 200, null, metricFrames(33));
+        when(metricQueryRepository.hasPromqlExecutor()).thenReturn(true);
+        when(metricQueryRepository.queryPromqlRange(
+                eq("otlp-metrics-console"), anyString(), eq(1_000L), eq(2_000L), eq("30s"), eq(32)))
+                .thenReturn(promqlSuccess(oversizedQueryData));
+
+        OtlpMetricsConsoleDto console = otlpIngestionWorkspaceService.getBoundedMetricsConsole(
+                AuthTokenScopes.DEFAULT_WORKSPACE_ID, null, null, 1_000L, 2_000L,
+                "checkout", "commerce", "prod", null, null, null,
+                "http_server_request_duration_count", null, null, "sum", "raw", "30", "32", null);
+
+        assertNotNull(console);
+        assertEquals(33, console.getResults().getFrames().size());
+        assertEquals(33, console.getStats().getTotalSeries());
+        verify(metricQueryRepository).queryPromqlRange(
+                eq("otlp-metrics-console"), anyString(), eq(1_000L), eq(2_000L), eq("30s"), eq(32));
+    }
+
+    @Test
     void metricsConsoleUsesOperationNameWithHttpRouteFallback() {
         observabilitySignalIntakeGateway.recordOtlpMetricIntake(
                 Map.of(

@@ -1,0 +1,58 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import en from '@/assets/i18n/explore/en-us.json';
+import ja from '@/assets/i18n/explore/ja-jp.json';
+import pt from '@/assets/i18n/explore/pt-br.json';
+import zhCn from '@/assets/i18n/explore/zh-cn.json';
+import zhTw from '@/assets/i18n/explore/zh-tw.json';
+
+const sectionKeys = ['traces', 'logs', 'metrics', 'topology', 'selectedLog', 'nearbyLogs'] as const;
+const stateKeys = ['available', 'empty', 'unavailable', 'noTraceContext'] as const;
+const actionKeys = ['backToResults', 'openLogs', 'openMetrics', 'openTopology', 'focusTrace'] as const;
+const queryKeys = [
+  'loading',
+  'empty',
+  'truncated',
+  'truncationUnknown',
+  'runtimeError',
+  'invalid',
+  'permission',
+  'overloaded',
+  'unavailable',
+  'contract'
+] as const;
+
+describe('Explore focused investigation locale contract', () => {
+  it('keeps the focused Trace and Log workspace copy aligned in every runtime locale', () => {
+    for (const locale of [en, ja, pt, zhCn, zhTw] as LocaleRoot[]) {
+      expect(locale.exploreInvestigation.title).toEqual(expect.any(String));
+      expect(locale.exploreInvestigation.exactWindow).toEqual(expect.any(String));
+      expect(locale.exploreInvestigation.availability).toEqual(expect.any(String));
+      for (const key of sectionKeys) expect(locale.exploreInvestigation.sections[key]).toEqual(expect.any(String));
+      for (const key of stateKeys) expect(locale.exploreInvestigation.states[key]).toEqual(expect.any(String));
+      for (const key of actionKeys) expect(locale.exploreInvestigation.actions[key]).toEqual(expect.any(String));
+      expect(locale.exploreInvestigation.metrics.service).toEqual(expect.any(String));
+      for (const key of queryKeys) expect(locale.exploreInvestigation.query[key]).toEqual(expect.any(String));
+    }
+  });
+});
+
+type LocaleRoot = {
+  exploreInvestigation: {
+    title: string;
+    exactWindow: string;
+    availability: string;
+    sections: Record<(typeof sectionKeys)[number], string>;
+    states: Record<(typeof stateKeys)[number], string>;
+    actions: Record<(typeof actionKeys)[number], string>;
+    metrics: { service: string };
+    query: Record<(typeof queryKeys)[number], string>;
+  };
+};

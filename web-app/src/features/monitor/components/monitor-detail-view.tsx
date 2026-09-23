@@ -40,11 +40,13 @@ import styles from './monitor-detail-view.module.css';
 export function MonitorDetailView({
   state,
   actions,
-  metricWorkbench
+  metricWorkbench,
+  signalView
 }: {
   state: MonitorDetailViewState;
   actions: MonitorDetailViewActions;
   metricWorkbench?: ReactNode;
+  signalView?: ReactNode;
 }) {
   if (state.detail.kind !== 'ready') {
     return <MonitorDetailState evidence={state.detail} onBack={actions.back} onRetry={actions.refresh} />;
@@ -56,6 +58,7 @@ export function MonitorDetailView({
       state={state}
       actions={actions}
       metricWorkbench={metricWorkbench}
+      signalView={signalView}
     />
   );
 }
@@ -64,12 +67,14 @@ function MonitorReadyDetailView({
   detail,
   state,
   actions,
-  metricWorkbench
+  metricWorkbench,
+  signalView
 }: {
   detail: Extract<MonitorDetailEvidence, { kind: 'ready' }>['detail'];
   state: MonitorDetailViewState;
   actions: MonitorDetailViewActions;
   metricWorkbench?: ReactNode;
+  signalView?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [configurationOpen, setConfigurationOpen] = useState(false);
@@ -99,6 +104,7 @@ function MonitorReadyDetailView({
         }
       />
       {metricWorkbench}
+      {signalView}
       <MonitorDetailConfigurationDrawer
         open={configurationOpen}
         onClose={() => setConfigurationOpen(false)}

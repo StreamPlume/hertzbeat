@@ -15,25 +15,9 @@
  * limitations under the License.
  */
 
-import type { LogRow, MetricConsole, TraceDetail, TraceRow, TraceSpan } from './explore-signal-contract';
+import type { LiveLogRow, LogRow, MetricConsole } from './explore-signal-contract';
 
 export type LiveLogStatus = 'waiting' | 'connected' | 'degraded' | 'paused' | 'unavailable' | 'error' | 'contract';
-export type TraceSpanTiming =
-  | { kind: 'unavailable' }
-  | { kind: 'instant'; offsetPercent: number }
-  | { kind: 'duration'; offsetPercent: number; widthPercent: number };
-export type TraceSpanLayout = TraceSpan & { depth: number; timing: TraceSpanTiming };
-export type TraceDetailState =
-  | { kind: 'closed' }
-  | { kind: 'loading' | 'missing' | 'permission' | 'unavailable' | 'error'; traceId: string }
-  | {
-      kind: 'ready';
-      traceId: string;
-      detail: TraceDetail;
-      spans: TraceSpanLayout[];
-      selected: TraceSpanLayout | undefined;
-    };
-
 export type MetricSeries = {
   key: string;
   name: string;
@@ -46,6 +30,7 @@ export type MetricPoint = { timestamp: number; value: number };
 
 export type MetricResultState =
   | { kind: 'error'; message?: string }
+  | { kind: 'contract_error' }
   | { kind: 'storage_unavailable' }
   | { kind: 'missing_context' }
   | { kind: 'unsupported_query' }
@@ -63,7 +48,8 @@ export function metricResultState(console: MetricConsole): MetricResultState {
   if (results.frames.length === 0) return { kind: 'empty' };
   if (results.frames.some(frame => !hasMetricFrameData(frame))) return { kind: 'storage_unavailable' };
   const series = metricSeries(console);
-  return series.some(item => metricPoints(item).length > 0) ? { kind: 'ready', series } : { kind: 'empty' };
+  if (series.some(item => item.points.some(point => !validMetricPoint(point)))) return { kind: 'contract_error' };
+  return series.some(item => item.points.length > 0) ? { kind: 'ready', series } : { kind: 'empty' };
 }
 
 function metricUnavailableState(console: MetricConsole): MetricResultState | undefined {
@@ -97,100 +83,12 @@ export function metricPoints(series: MetricSeries): MetricPoint[] {
   });
 }
 
-export function metricPath(points: MetricPoint[], width: number, height: number) {
-  if (points.length === 0) return '';
-  const timestamps = points.map(point => point.timestamp);
-  const values = points.map(point => point.value);
-  const minTimestamp = Math.min(...timestamps);
-  const maxTimestamp = Math.max(...timestamps);
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const timestampRange = maxTimestamp - minTimestamp || 1;
-  const valueRange = maxValue - minValue || 1;
-  return points
-    .map((point, index) => {
-      const x = ((point.timestamp - minTimestamp) / timestampRange) * width;
-      const y = height - ((point.value - minValue) / valueRange) * height;
-      return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(' ');
-}
-
-export function traceDurationMs(row: Pick<TraceRow, 'durationNanos'>) {
-  return row.durationNanos == null ? undefined : row.durationNanos / 1_000_000;
-}
-
-export function traceHealthState(row: Pick<TraceRow, 'status' | 'errorSpanCount'>): 'ok' | 'error' | 'unknown' {
-  const status = row.status?.trim().toUpperCase();
-  if (status === 'ERROR' || (row.errorSpanCount != null && row.errorSpanCount > 0)) return 'error';
-  if (status === 'OK') return 'ok';
-  return 'unknown';
-}
-
-export function traceSpanLayout(detail: TraceDetail): TraceSpanLayout[] {
-  const spans = [...(detail.spans ?? [])].sort(compareTraceSpanStart);
-  const timeline = traceTimeline(detail, spans);
-  const byId = new Map(spans.map(span => [span.spanId, span]));
-  const depthOf = (span: TraceSpan, visited = new Set<string>()): number => {
-    if (!span.parentSpanId || visited.has(span.parentSpanId)) return 0;
-    const parent = byId.get(span.parentSpanId);
-    if (!parent) return 0;
-    visited.add(span.parentSpanId);
-    return Math.min(depthOf(parent, visited) + 1, 8);
-  };
-  return spans.map(span => ({
-    ...span,
-    depth: depthOf(span),
-    timing: traceSpanTiming(span, timeline)
-  }));
-}
-
-type TraceTimeline = { startTime: number; durationMs: number };
-
-function traceTimeline(detail: TraceDetail, spans: TraceSpan[]): TraceTimeline | undefined {
-  // Only complete timing pairs define the extent. Nullable fields must not
-  // participate as synthetic epoch or zero-duration evidence.
-  const timedSpans = spans.filter(hasCompleteSpanTiming);
-  const startTime = detail.startTime ?? timedSpans[0]?.startTime;
-  if (startTime == null) return undefined;
-
-  const declaredEnd = startTime + (traceDurationMs(detail) ?? 0);
-  const endTime = timedSpans.reduce(
-    (latest, span) => Math.max(latest, span.startTime + span.durationNanos / 1_000_000),
-    Math.max(startTime, declaredEnd)
-  );
-  return { startTime, durationMs: endTime - startTime };
-}
-
-function traceSpanTiming(span: TraceSpan, timeline: TraceTimeline | undefined): TraceSpanTiming {
-  if (!timeline || !hasCompleteSpanTiming(span)) return { kind: 'unavailable' };
-  const offsetPercent =
-    timeline.durationMs > 0 ? clamp(((span.startTime - timeline.startTime) / timeline.durationMs) * 100, 0, 100) : 0;
-  if (span.durationNanos === 0) return { kind: 'instant', offsetPercent };
-  if (timeline.durationMs === 0) return { kind: 'unavailable' };
-  return {
-    kind: 'duration',
-    offsetPercent,
-    widthPercent: clamp((span.durationNanos / 1_000_000 / timeline.durationMs) * 100, 0.4, 100)
-  };
-}
-
-function hasCompleteSpanTiming(span: TraceSpan): span is TraceSpan & { startTime: number; durationNanos: number } {
-  return span.startTime != null && span.durationNanos != null;
-}
-
-function compareTraceSpanStart(left: TraceSpan, right: TraceSpan) {
-  if (left.startTime == null) return right.startTime == null ? 0 : 1;
-  if (right.startTime == null) return -1;
-  return left.startTime - right.startTime;
-}
-
-export function logServiceName(row: LogRow) {
+export function logServiceName(row: LogRow | LiveLogRow) {
   const value = row.resource?.['service.name'] ?? row.resource?.service_name;
   return typeof value === 'string' ? value : undefined;
 }
 
-export function logBody(row: LogRow) {
+export function logBody(row: LogRow | LiveLogRow) {
   if (typeof row.body === 'string') return row.body;
   if (row.body == null) return undefined;
   try {
@@ -200,13 +98,13 @@ export function logBody(row: LogRow) {
   }
 }
 
-export function logTimestampMs(row: LogRow) {
+export function logTimestampMs(row: LogRow | LiveLogRow) {
   const timestamp = row.timeUnixNano ?? row.observedTimeUnixNano;
-  return timestamp == null ? undefined : Math.floor(timestamp / 1_000_000);
-}
-
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(Math.max(value, minimum), maximum);
+  if (timestamp == null) return undefined;
+  if (typeof timestamp === 'number') return Math.floor(timestamp / 1_000_000);
+  if (!/^[1-9]\d{0,18}$/u.test(timestamp)) return undefined;
+  const milliseconds = BigInt(timestamp) / 1_000_000n;
+  return milliseconds <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(milliseconds) : undefined;
 }
 
 function metricErrorState(message?: string): MetricResultState {
@@ -219,6 +117,17 @@ function metricNumber(value: unknown) {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function validMetricPoint(point: unknown[]) {
+  const timestamp = metricNumber(point[0]);
+  return (
+    point.length >= 2 &&
+    timestamp != null &&
+    Number.isSafeInteger(timestamp) &&
+    timestamp > 0 &&
+    metricNumber(point[1]) != null
+  );
 }
 
 function hasMetricFrameData(frame: unknown) {

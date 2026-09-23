@@ -18,9 +18,12 @@
 import { MonitorDetailView } from '../components/monitor-detail-view';
 import { MonitorMetricWorkbench } from '../components/monitor-metric-workbench';
 import { MonitorReadPermissionState } from '../components/monitor-read-permission-state';
+import { MonitorSignalView } from '../components/monitor-signal-view';
 import { useMonitorCapabilities } from '../controller/use-monitor-capabilities';
 import { useMonitorDetailController } from '../controller/use-monitor-detail-controller';
 import { useMonitorMetricWorkbenchController } from '../controller/use-monitor-metric-workbench-controller';
+import { buildMonitorInvestigationEntityPath } from '../model/monitor-investigation-model';
+import { useNavigate } from 'react-router-dom';
 
 export function MonitorDetailPage() {
   const capabilities = useMonitorCapabilities();
@@ -31,6 +34,7 @@ export function MonitorDetailPage() {
 }
 
 function MonitorDetailWorkspace() {
+  const navigate = useNavigate();
   const detail = useMonitorDetailController();
   const ready = detail.state.detail.kind === 'ready' ? detail.state.detail.detail : undefined;
   const metrics = useMonitorMetricWorkbenchController(ready?.monitor, ready?.metrics ?? [], {
@@ -41,6 +45,19 @@ function MonitorDetailWorkspace() {
     }
   });
   return (
-    <MonitorDetailView {...detail} metricWorkbench={ready ? <MonitorMetricWorkbench {...metrics} /> : undefined} />
+    <MonitorDetailView
+      {...detail}
+      metricWorkbench={ready ? <MonitorMetricWorkbench {...metrics} /> : undefined}
+      signalView={
+        ready ? (
+          <MonitorSignalView
+            state={metrics.state.investigation}
+            nativeMetrics={metrics.state.catalog}
+            openSignal={metrics.actions.openInvestigationSignal}
+            openEntity={(entityId, window) => void navigate(buildMonitorInvestigationEntityPath(entityId, window))}
+          />
+        ) : undefined
+      }
+    />
   );
 }

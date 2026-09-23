@@ -28,6 +28,7 @@ type MonitorMetricWorkbenchResultInput = {
   historyAvailability: MonitorMetricWorkbenchController['state']['historyAvailability'];
   historyCharts: MonitorMetricWorkbenchController['state']['historyCharts'];
   selectedHistoryChart?: MonitorMetricWorkbenchController['state']['selectedHistoryChart'];
+  investigation: MonitorMetricWorkbenchController['state']['investigation'];
   investigationSignals: SignalKind[];
   hasMoreHistoryCharts: boolean;
   realtime: MonitorMetricWorkbenchController['state']['realtime'];
@@ -71,6 +72,7 @@ function buildWorkbenchState(input: MonitorMetricWorkbenchResultInput): MonitorM
     historyAvailability: input.historyAvailability,
     historyCharts: input.historyCharts,
     selectedHistoryChart: input.selectedHistoryChart,
+    investigation: input.investigation,
     investigationSignals: input.investigationSignals,
     hasMoreHistoryCharts: input.hasMoreHistoryCharts,
     realtime: input.realtime,

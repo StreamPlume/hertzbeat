@@ -30,7 +30,7 @@ export function OtlpAttributeSection({ title, value }: { title: string; value?: 
   );
 }
 
-export function OtlpAttributeList({ value }: { value?: AttributeMap | undefined }) {
+function OtlpAttributeList({ value }: { value?: AttributeMap | undefined }) {
   const entries = Object.entries(value ?? {});
   if (entries.length === 0) return <span>—</span>;
   return (

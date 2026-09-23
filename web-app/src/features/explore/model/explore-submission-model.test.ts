@@ -26,6 +26,7 @@ describe('explore submission model', () => {
         signal: 'metrics',
         timeRange: 'last-30m',
         serviceName: 'checkout',
+        serviceNamespace: 'commerce',
         environment: 'prod',
         instance: 'checkout-7d9',
         endpoint: '/checkout',
@@ -39,6 +40,7 @@ describe('explore submission model', () => {
     ).toEqual({
       signal: 'metrics',
       serviceName: 'checkout',
+      serviceNamespace: 'commerce',
       environment: 'prod',
       instance: 'checkout-7d9',
       endpoint: '/checkout',
@@ -65,6 +67,7 @@ describe('explore submission model', () => {
     ).toEqual({
       signal: 'traces',
       serviceName: '',
+      serviceNamespace: '',
       environment: '',
       instance: '',
       endpoint: '',
@@ -85,6 +88,7 @@ describe('explore submission model', () => {
       buildSubmissionPatch({
         signal: 'metrics',
         serviceName: ' checkout ',
+        serviceNamespace: ' commerce ',
         environment: ' prod ',
         instance: ' checkout-7d9 ',
         endpoint: ' /checkout ',
@@ -99,6 +103,7 @@ describe('explore submission model', () => {
       valid: true,
       patch: {
         serviceName: 'checkout',
+        serviceNamespace: 'commerce',
         environment: 'prod',
         instance: 'checkout-7d9',
         endpoint: '/checkout',
@@ -117,6 +122,7 @@ describe('explore submission model', () => {
         buildSubmissionPatch({
           signal: 'metrics',
           serviceName: '',
+          serviceNamespace: '',
           environment: '',
           instance: '',
           endpoint: '',
@@ -142,6 +148,7 @@ describe('explore submission model', () => {
       buildSubmissionPatch({
         signal: 'logs',
         serviceName: '',
+        serviceNamespace: ' commerce ',
         environment: ' prod ',
         instance: '',
         endpoint: '',
@@ -160,6 +167,7 @@ describe('explore submission model', () => {
       valid: true,
       patch: {
         serviceName: undefined,
+        serviceNamespace: 'commerce',
         environment: 'prod',
         instance: undefined,
         endpoint: undefined,
@@ -181,6 +189,7 @@ describe('explore submission model', () => {
       buildSubmissionPatch({
         signal: 'traces',
         serviceName: '',
+        serviceNamespace: '',
         environment: '',
         instance: '',
         endpoint: '',
@@ -198,6 +207,7 @@ describe('explore submission model', () => {
       valid: true,
       patch: {
         serviceName: undefined,
+        serviceNamespace: undefined,
         environment: undefined,
         instance: undefined,
         endpoint: undefined,
@@ -223,6 +233,7 @@ describe('explore submission model', () => {
       const result = buildSubmissionPatch({
         signal: 'traces',
         serviceName: '',
+        serviceNamespace: '',
         environment: '',
         instance: '',
         endpoint: '',
@@ -238,5 +249,83 @@ describe('explore submission model', () => {
       });
       expect(result).toEqual({ valid: false, errors: [{ field, code }] });
     }
+  });
+
+  it('submits blank log filters as undefined so an empty scope queries all authorized logs', () => {
+    expect(
+      buildSubmissionPatch({
+        signal: 'logs',
+        serviceName: '',
+        serviceNamespace: '',
+        environment: '',
+        instance: '',
+        endpoint: '',
+        query: '',
+        severityText: '',
+        traceId: '',
+        spanId: '',
+        resourceFilter: '   ',
+        attributeFilter: '',
+        hideInternal: false,
+        hideNoise: false
+      })
+    ).toEqual({
+      valid: true,
+      patch: {
+        serviceName: undefined,
+        serviceNamespace: undefined,
+        environment: undefined,
+        instance: undefined,
+        endpoint: undefined,
+        query: undefined,
+        severityText: undefined,
+        traceId: undefined,
+        spanId: undefined,
+        resourceFilter: undefined,
+        attributeFilter: undefined,
+        hideInternal: undefined,
+        hideNoise: undefined,
+        pageIndex: undefined
+      }
+    });
+  });
+
+  it('preserves raw Code filters as the backend escape hatch even when Builder cannot represent them', () => {
+    expect(
+      buildSubmissionPatch({
+        signal: 'logs',
+        serviceName: '',
+        serviceNamespace: '',
+        environment: '',
+        instance: '',
+        endpoint: '',
+        query: '',
+        severityText: '',
+        traceId: '',
+        spanId: '',
+        resourceFilter: ' service.name:checkout ',
+        attributeFilter: ` http.route LIKE '/checkout' `,
+        hideInternal: false,
+        hideNoise: false
+      })
+    ).toEqual({
+      valid: true,
+      patch: {
+        serviceName: undefined,
+        serviceNamespace: undefined,
+        environment: undefined,
+        instance: undefined,
+        endpoint: undefined,
+        query: undefined,
+        severityText: undefined,
+        traceId: undefined,
+        spanId: undefined,
+        resourceFilter: 'service.name:checkout',
+        attributeFilter: `http.route LIKE '/checkout'`,
+        hideInternal: undefined,
+        hideNoise: undefined,
+        pageIndex: undefined
+      }
+    });
   });
 });

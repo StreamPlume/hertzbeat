@@ -80,7 +80,7 @@ export function RouteTimeProvider({ children, policy, canonicalizeInvalidExact =
   const invalidExact = policy === 'route_owned' && hasExactTimeWindowFields(params) && !exact;
   // Relative route windows share the rolling refresh cadence; explicit URL windows remain immutable evidence.
   const usesGlobalState = policy === 'global' || (policy === 'route_owned' && !hasExactTimeWindowFields(params));
-  const [routeRefreshRevision, bumpRouteRefresh] = useReducer(revision => revision + 1, 0);
+  const [routeRefreshRevision, bumpRouteRefresh] = useReducer(incrementRevision, 0);
 
   useEffect(() => {
     if (!canonicalizeInvalidExact || !invalidExact) return;
@@ -126,6 +126,10 @@ export function RouteTimeProvider({ children, policy, canonicalizeInvalidExact =
   ]);
 
   return <RouteTimeContext.Provider value={value}>{children}</RouteTimeContext.Provider>;
+}
+
+function incrementRevision(revision: number) {
+  return revision + 1;
 }
 
 function resolveTimeWindow(

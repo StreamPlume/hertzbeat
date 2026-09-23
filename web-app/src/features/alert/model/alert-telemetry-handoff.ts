@@ -15,9 +15,9 @@ const maximumScopeLength = 512;
 const maximumJavaScriptTimestamp = 8_640_000_000_000_000;
 
 const scopeLabelKeys = {
-  serviceName: ['service.name', 'service', 'serviceName', 'job', 'instance'],
-  serviceNamespace: ['service.namespace', 'serviceNamespace', 'service_namespace'],
-  environment: ['deployment.environment.name', 'environment', 'deployment.environment']
+  serviceName: 'service.name',
+  serviceNamespace: 'service.namespace',
+  environment: 'deployment.environment.name'
 } as const;
 
 export type AlertTelemetryHandoff = {
@@ -29,6 +29,7 @@ export function alertTelemetryHandoffs(alert: AlertRecord): AlertTelemetryHandof
   const scope = exactTelemetryScope(alert.labels);
   if (!scope) return [];
   const window = exactAlertWindow(alert);
+  if (!window) return [];
   return alertTelemetrySignals.map(signal => ({
     signal,
     path: buildExplorePath({ signal, timeRange: 'last-30m', ...scope, ...window })
@@ -48,20 +49,9 @@ function exactTelemetryScope(labels: AlertRecord['labels']) {
   };
 }
 
-function exactLabelValue(labels: Record<string, string>, keys: readonly string[]): string | null | undefined {
-  const canonical = labels[keys[0] ?? ''];
-  if (canonical !== undefined && canonical.trim() !== '') return boundedScopeValue(canonical);
-  const values: string[] = [];
-  for (const key of keys.slice(1)) {
-    const raw = labels[key];
-    if (raw === undefined || raw.trim() === '') continue;
-    const value = boundedScopeValue(raw);
-    if (!value) return null;
-    values.push(value);
-  }
-  const unique = [...new Set(values)];
-  if (unique.length > 1) return null;
-  return unique[0];
+function exactLabelValue(labels: Record<string, string>, key: string) {
+  const value = labels[key];
+  return value === undefined ? undefined : boundedScopeValue(value);
 }
 
 function boundedScopeValue(value: string) {
@@ -80,14 +70,13 @@ function hasControlCharacter(value: string) {
 }
 
 function exactAlertWindow(alert: Pick<AlertRecord, 'startAt' | 'activeAt' | 'endAt'>) {
-  const first = alert.startAt ?? alert.activeAt;
-  const last = alert.endAt ?? alert.activeAt ?? alert.startAt;
-  if (!validTimestamp(first) || !validTimestamp(last)) return {};
-  const start = Math.max(1, first - alertWindowPaddingMs);
-  const end = Math.min(maximumJavaScriptTimestamp, last + alertWindowPaddingMs);
-  return start < end ? { start, end } : {};
+  const anchor = alert.activeAt ?? alert.startAt;
+  if (!validTimestamp(anchor)) return null;
+  const start = Math.max(1, anchor - alertWindowPaddingMs);
+  const end = Math.min(maximumJavaScriptTimestamp, anchor + alertWindowPaddingMs);
+  return start < end ? { start, end } : null;
 }
 
 function validTimestamp(value: number | null): value is number {
-  return value !== null && Number.isSafeInteger(value) && value >= 0 && value <= maximumJavaScriptTimestamp;
+  return value !== null && Number.isSafeInteger(value) && value > 0 && value <= maximumJavaScriptTimestamp;
 }

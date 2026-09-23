@@ -55,6 +55,7 @@ export const entityRoutePaths = {
 /** Alert path templates shared by route registration and feature navigation. */
 export const alertRoutePaths = {
   center: alertCenterPath,
+  investigation: `${alertCenterPath}/:alertId/investigate`,
   rules: alertRuleListPath,
   ruleNew: `${alertRuleListPath}/new`,
   ruleEdit: `${alertRuleListPath}/:ruleId/edit`,
@@ -63,6 +64,11 @@ export const alertRoutePaths = {
   silences: `${alertCenterPath}/silences`,
   integrations: alertIntegrationPath
 } as const;
+
+export function buildAlertInvestigationRoutePath(alertId: number) {
+  if (!Number.isSafeInteger(alertId) || alertId <= 0) throw new Error('Alert identity is invalid');
+  return alertRoutePaths.investigation.replace(':alertId', String(alertId));
+}
 
 /** Builds the new-rule route only after the operator has selected its evaluation strategy. */
 export function buildAlertRuleNewPath(kind: 'realtime' | 'periodic') {

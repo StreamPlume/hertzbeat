@@ -7,24 +7,31 @@ import { OperationalCommandBar, OperationalPage, OperationalPageHeader } from '@
 
 import type { EntityRecord } from '../model/entity-contract';
 import { localizeEntityCode } from '../model/entity-display';
+import type { EntityExploreSignal } from '../model/entity-operational-navigation';
+import type { EntitySignalViewState } from '../model/entity-signal-view-model';
 import { EntityIdentityMetadata } from './entity-detail-metadata';
+import { EntitySignalView } from './entity-signal-view';
 
 type DegradedEntityDetailActions = {
   refresh: () => void;
   back: () => void;
   edit: () => void;
   definition: () => void;
+  explore: (signal: EntityExploreSignal) => void;
+  topology: () => void;
   remove: () => void;
 };
 
 export function DegradedEntityDetail({
   entity,
   state,
-  actions
+  actions,
+  signals
 }: {
   entity: EntityRecord;
   state: { deleting: boolean; refreshing: boolean; canWrite: boolean; canDelete: boolean };
   actions: DegradedEntityDetailActions;
+  signals?: EntitySignalViewState | undefined;
 }) {
   const { t } = useTranslation();
   return (
@@ -66,6 +73,9 @@ export function DegradedEntityDetail({
         message={t('entity.degraded.title')}
         description={t('entity.degraded.description')}
       />
+      {signals ? (
+        <EntitySignalView state={signals} openSignal={actions.explore} openTopology={actions.topology} />
+      ) : null}
       <EntityIdentityMetadata entity={entity} />
     </OperationalPage>
   );

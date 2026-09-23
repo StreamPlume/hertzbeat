@@ -28,6 +28,7 @@ export { EXPLORE_METRIC_AGGREGATIONS } from './explore-field-contract';
 
 type SharedExploreSubmissionDraft = {
   serviceName: string;
+  serviceNamespace: string;
   environment: string;
   instance: string;
   endpoint: string;
@@ -154,6 +155,7 @@ function traceDraftFromQuery(query: Extract<ExploreQuery, { signal: 'traces' }>)
 function sharedDraftFromQuery(query: ExploreQuery): SharedExploreSubmissionDraft {
   return {
     serviceName: query.serviceName ?? '',
+    serviceNamespace: query.serviceNamespace ?? '',
     environment: query.environment ?? '',
     instance: query.instance ?? '',
     endpoint: query.endpoint ?? '',
@@ -233,6 +235,7 @@ function buildTraceSubmissionPatch(draft: TraceExploreSubmissionDraft): ExploreS
 function sharedSubmissionPatch(draft: SharedExploreSubmissionDraft): ExploreQueryPatch {
   return {
     serviceName: normalizedValue(draft.serviceName),
+    serviceNamespace: normalizedValue(draft.serviceNamespace),
     environment: normalizedValue(draft.environment),
     instance: normalizedValue(draft.instance),
     endpoint: normalizedValue(draft.endpoint),

@@ -24,9 +24,9 @@ export type ComponentDeleteContext = {
   retireIncidentDetail: () => void;
   notify: StatusManagementNotifications;
   queryClient: QueryClient;
-  committedDeletes: React.RefObject<Set<number>>;
-  recovery: React.RefObject<StatusDeleteReceipt | undefined>;
-  recoveryProofPending: React.RefObject<boolean>;
+  committedDeletes: React.MutableRefObject<Set<number>>;
+  recovery: React.MutableRefObject<StatusDeleteReceipt | undefined>;
+  recoveryProofPending: React.MutableRefObject<boolean>;
   setDeleteRecovery: (value: boolean) => void;
   setDeleteRecoveryPending: (value: boolean) => void;
 };

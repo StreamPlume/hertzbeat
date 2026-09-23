@@ -15,13 +15,22 @@
  * limitations under the License.
  */
 
-import type { ExplorePageResult, LogHistoryEvidence, MetricConsole, TraceRow } from './explore-signal-contract';
+import type {
+  ExplorePageResult,
+  LogHistoryEvidence,
+  MetricConsole,
+  MetricSignalEvidence,
+  TraceRow
+} from './explore-signal-contract';
 import type { MetricResultState } from './explore-signal-model';
+import type { ExactTimeWindow } from '@/shared/query-context';
+
+type EvidenceOwner = { window: ExactTimeWindow; revision: number };
 
 export type HistoricalEvidence =
-  | { signal: 'metrics'; data: MetricConsole }
-  | { signal: 'logs'; data: LogHistoryEvidence }
-  | { signal: 'traces'; data: ExplorePageResult<TraceRow> };
+  | (EvidenceOwner & { signal: 'metrics'; data: MetricSignalEvidence })
+  | (EvidenceOwner & { signal: 'logs'; data: LogHistoryEvidence })
+  | (EvidenceOwner & { signal: 'traces'; data: ExplorePageResult<TraceRow> });
 
 export type ExploreFailureKind = 'permission' | 'transport_error' | 'contract_error' | 'error';
 
@@ -29,15 +38,17 @@ type ExploreFailureResultState = {
   [Kind in ExploreFailureKind]: { kind: Kind };
 }[ExploreFailureKind];
 
-export type ExploreCurrentResultState =
-  | { kind: 'metric'; state: MetricResultState; data: MetricConsole }
-  | {
-      kind: 'empty' | 'ready';
-      signal: 'logs';
-      data: LogHistoryEvidence['page'];
-      statistics: Pick<LogHistoryEvidence, 'overview' | 'trend'>;
-    }
-  | { kind: 'empty' | 'ready'; signal: 'traces'; data: ExplorePageResult<TraceRow> };
+export type ExploreCurrentResultState = EvidenceOwner &
+  (
+    | { kind: 'metric'; state: MetricResultState; data?: MetricConsole | undefined }
+    | {
+        kind: 'empty' | 'ready';
+        signal: 'logs';
+        data: LogHistoryEvidence['page'];
+        statistics: Pick<LogHistoryEvidence, 'overview' | 'trend'>;
+      }
+    | { kind: 'empty' | 'ready'; signal: 'traces'; data: ExplorePageResult<TraceRow> }
+  );
 
 export type ExplorePageResultState =
   | { kind: 'invalid' }

@@ -5,7 +5,7 @@
  * The ASF licenses this file to You under the Apache License, Version 2.0.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useResourceParams } from '@refinedev/core';
 import { Outlet, useLocation } from 'react-router-dom';
 
@@ -19,6 +19,8 @@ import { ShellNavigation } from './shell-navigation';
 import { readShellResourceMeta, resolveShellTimePolicy } from './shell-navigation-model';
 import styles from './hertzbeat-shell.module.css';
 
+const NARROW_EXPLORE_QUERY = '(max-width: 768px)';
+
 export function HertzBeatShell() {
   return (
     <QueryContextProvider>
@@ -30,8 +32,10 @@ export function HertzBeatShell() {
 }
 
 function RouteOwnedShell() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [manualCollapsed, setManualCollapsed] = useState(false);
   const location = useLocation();
+  const routeCollapsed = useNarrowExploreNavigation(location.pathname);
+  const collapsed = manualCollapsed || routeCollapsed;
   const { action, resource } = useResourceParams();
   const policy: TimeOwnership = resolveShellTimePolicy(readShellResourceMeta(resource?.meta?.shell), action);
   return (
@@ -44,7 +48,11 @@ function RouteOwnedShell() {
         <div className={`${styles.shell} ${collapsed ? styles.shellCollapsed : ''}`}>
           <ShellHeader />
           <div className={styles.shellBody}>
-            <ShellNavigation collapsed={collapsed} onCollapsedChange={setCollapsed} />
+            <ShellNavigation
+              collapsed={collapsed}
+              collapseLocked={routeCollapsed}
+              onCollapsedChange={setManualCollapsed}
+            />
             <main className={styles.content}>
               <Outlet />
             </main>
@@ -53,4 +61,21 @@ function RouteOwnedShell() {
       </ShellInvestigationProvider>
     </RouteTimeProvider>
   );
+}
+
+function useNarrowExploreNavigation(pathname: string) {
+  const [narrow, setNarrow] = useState(() => matchesNarrowExplore());
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(NARROW_EXPLORE_QUERY);
+    const update = () => setNarrow(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return pathname === applicationRoutePaths.explore && narrow;
+}
+
+function matchesNarrowExplore() {
+  return typeof window.matchMedia === 'function' && window.matchMedia(NARROW_EXPLORE_QUERY).matches;
 }

@@ -25,14 +25,27 @@ import bundleLimits from './bundle-limits.json' with { type: 'json' };
 
 test('vendor chunks stay within the application chunk warning boundary', () => {
   const chunkWarningBytes = bundleLimits.chunkWarningKilobytes * 1024;
-  const approvedTotalJavaScriptCeiling = 7_100_000;
+  const approvedBaseJavaScriptCeiling = 7_100_000;
+  const approvedPersesRuntimeAllowance = 1_400_000;
+  const approvedPersesMultiSignalAllowance = 600_000;
+  const approvedObservabilityWorkbenchAllowance = 40_000;
+  const approvedAlertInvestigationAllowance = 40_000;
 
   assert.ok(bundleLimits.vendorChunkMinBytes > 0);
   assert.ok(bundleLimits.vendorChunkMinBytes <= bundleLimits.vendorChunkMaxBytes);
   assert.ok(bundleLimits.vendorChunkMaxBytes <= chunkWarningBytes);
   assert.ok(bundleLimits.shellGzipBytes > 0);
-  assert.ok(bundleLimits.totalJavaScriptBytes > chunkWarningBytes);
-  assert.ok(bundleLimits.totalJavaScriptBytes <= approvedTotalJavaScriptCeiling);
+  assert.ok(bundleLimits.baseApplicationJavaScriptBytes > chunkWarningBytes);
+  assert.ok(bundleLimits.baseApplicationJavaScriptBytes <= approvedBaseJavaScriptCeiling);
+  assert.ok(bundleLimits.persesRuntimeJavaScriptAllowanceBytes > 0);
+  assert.ok(bundleLimits.persesRuntimeJavaScriptAllowanceBytes <= approvedPersesRuntimeAllowance);
+  assert.equal(bundleLimits.persesMultiSignalJavaScriptAllowanceBytes, approvedPersesMultiSignalAllowance);
+  assert.equal(bundleLimits.observabilityWorkbenchJavaScriptAllowanceBytes, approvedObservabilityWorkbenchAllowance);
+  assert.equal(bundleLimits.alertInvestigationJavaScriptAllowanceBytes, approvedAlertInvestigationAllowance);
+  assert.deepEqual(bundleLimits.persesDynamicRuntimeSources, [
+    'src/platform/perses/runtime/perses-time-series-runtime.tsx',
+    'src/platform/perses/runtime/perses-signal-runtime.tsx'
+  ]);
 });
 
 test('manual vendor splitting preserves dependency execution order', async () => {

@@ -24,12 +24,13 @@ import { QueryContextProvider } from '@/shared/query-context';
 import { GlobalTimeProvider, RouteTimeProvider, useSharedTime, type SharedTimeValue } from '@/shared/time';
 
 import { buildSignalApiPath } from '../api/explore-api';
-import type { ExploreQuery, ExploreQueryPatch } from '../model/explore-model';
+import { parseExploreQuery, type ExploreQuery, type ExploreQueryPatch } from '../model/explore-model';
 import type { MetricConsole } from '../model/explore-signal-contract';
 import { exploreQueryKeys } from './explore-query-keys';
 import { useExplorePageController } from './use-explore-page-controller';
 
 const api = vi.hoisted(() => ({ loadLogSignal: vi.fn(), loadMetricSignal: vi.fn(), loadTraceSignal: vi.fn() }));
+const cachedWindow = { from: 1_000, to: 2_000 } as const;
 vi.mock('../api/explore-api', async importOriginal => ({
   ...(await importOriginal<typeof import('../api/explore-api')>()),
   ...api,
@@ -144,6 +145,17 @@ describe('Explore page controller', () => {
     expect(api.loadLogSignal).not.toHaveBeenCalled();
   });
 
+  it.each([
+    '/explore?signal=traces&traceId=0123456789abcdef0123456789abcdef&start=1000&end=2000&timeZone=UTC',
+    '/explore?signal=logs&logRecordUid=record-1&start=1000&end=2000&timeZone=UTC'
+  ])('bypasses ordinary history loaders for a valid focused route: %s', async path => {
+    const routed = renderController([path]);
+    await waitFor(() => expect(routed.current().investigationRoute.kind).not.toBe('inactive'));
+    expect(api.loadMetricSignal).not.toHaveBeenCalled();
+    expect(api.loadLogSignal).not.toHaveBeenCalled();
+    expect(api.loadTraceSignal).not.toHaveBeenCalled();
+  });
+
   it('preserves a complete handoff on query submission and requests the resulting scoped exact query', async () => {
     const routed = renderController([
       '/explore?signal=metrics&intakeProfileId=collector%3Aeast&collectorId=east&serviceName=checkout' +
@@ -242,36 +254,41 @@ describe('Explore page controller', () => {
     expect(routed.router.state.location.search).toBe(submittedSearch);
   });
 
-  it('keeps preset ranges relative and exact onboarding windows fixed', async () => {
+  it('keeps preset URLs relative while transport and evidence freeze one exact request window', async () => {
     const relative = renderController(['/explore?signal=metrics']);
     await waitFor(() => expect(api.loadMetricSignal).toHaveBeenCalled());
-    expect(api.loadMetricSignal.mock.calls[0]?.[0]).toMatchObject({
-      timeRange: 'last-30m',
-      start: undefined,
-      end: undefined
-    });
+    const first = api.loadMetricSignal.mock.calls[0]?.[0] as ExploreQuery;
+    expect(first).toMatchObject({ timeRange: 'last-30m', windowMode: undefined });
+    expect(first.end! - first.start!).toBe(30 * 60 * 1_000);
+    await waitFor(() =>
+      expect(relative.current().result).toMatchObject({ window: { from: first.start, to: first.end }, revision: 0 })
+    );
+    expect(relative.router.state.location.search).not.toMatch(/[?&](?:start|end)=/u);
     act(() => relative.current().updateQuery({ timeRange: 'last-1h', start: undefined, end: undefined }));
-    await waitFor(() => expect(api.loadMetricSignal).toHaveBeenCalledTimes(2));
-    expect(api.loadMetricSignal.mock.calls[1]?.[0]).toMatchObject({
-      timeRange: 'last-1h',
-      start: undefined,
-      end: undefined
-    });
+    await waitFor(() =>
+      expect((api.loadMetricSignal.mock.lastCall?.[0] as ExploreQuery | undefined)?.timeRange).toBe('last-1h')
+    );
+    const second = api.loadMetricSignal.mock.lastCall?.[0] as ExploreQuery;
+    expect(second).toMatchObject({ timeRange: 'last-1h', windowMode: undefined });
+    expect(second.end! - second.start!).toBe(60 * 60 * 1_000);
+    const requestCount = api.loadMetricSignal.mock.calls.length;
     await act(async () => relative.current().refresh());
-    expect(api.loadMetricSignal.mock.calls[2]?.[0]).toMatchObject({
-      timeRange: 'last-1h',
-      start: undefined,
-      end: undefined
-    });
+    await waitFor(() => expect(api.loadMetricSignal.mock.calls.length).toBeGreaterThan(requestCount));
+    const refreshed = api.loadMetricSignal.mock.lastCall?.[0] as ExploreQuery;
+    expect(refreshed).toMatchObject({ timeRange: 'last-1h', windowMode: undefined });
+    expect(refreshed.end! - refreshed.start!).toBe(60 * 60 * 1_000);
+    expect(relative.router.state.location.search).not.toMatch(/[?&](?:start|end)=/u);
     relative.unmount();
 
     const exact = renderController([
       '/explore?signal=metrics&serviceName=checkout&serviceNamespace=shop&environment=prod&collectorId=east&start=1000&end=2000'
     ]);
-    await waitFor(() => expect(api.loadMetricSignal).toHaveBeenCalledTimes(4));
-    expect(api.loadMetricSignal.mock.calls[3]?.[0]).toMatchObject({ start: 1000, end: 2000 });
+    await waitFor(() => expect(api.loadMetricSignal.mock.lastCall?.[0]).toMatchObject({ start: 1000, end: 2000 }));
+    expect(api.loadMetricSignal.mock.lastCall?.[0]).toMatchObject({ start: 1000, end: 2000 });
+    const exactRequestCount = api.loadMetricSignal.mock.calls.length;
     await act(async () => exact.current().refresh());
-    expect(api.loadMetricSignal.mock.calls[4]?.[0]).toMatchObject({ start: 1000, end: 2000 });
+    await waitFor(() => expect(api.loadMetricSignal.mock.calls.length).toBeGreaterThan(exactRequestCount));
+    expect(api.loadMetricSignal.mock.lastCall?.[0]).toMatchObject({ start: 1000, end: 2000 });
   });
 
   it.each(['metrics', 'logs', 'traces'] as const)(
@@ -410,7 +427,7 @@ describe('Explore page controller', () => {
       'error'
     ],
     ['true empty', metricConsole([]), 'empty'],
-    ['invalid numeric data', metricConsole([{ schema: null, data: [[1000, 'not-a-number']] }]), 'empty'],
+    ['invalid numeric data', metricConsole([{ schema: null, data: [[1000, 'not-a-number']] }]), 'contract_error'],
     ['zero-valued data', metricConsole([{ schema: null, data: [[1000, 0]] }]), 'ready']
   ] as const)('classifies $0 once and preserves the metric result object', async (_name, evidence, kind) => {
     api.loadMetricSignal.mockResolvedValue(evidence);
@@ -476,11 +493,13 @@ describe('Explore page controller', () => {
       refreshSignal = signal;
       return refresh.promise;
     });
-    const query: ExploreQuery = { signal: 'logs', timeRange: 'last-30m', query: 'cached' };
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const query = canonicalQuery('signal=logs&timeRange=last-30m&query=cached');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(exploreQueryKeys.history(query, undefined, 0), {
       signal: 'logs',
-      data: logEvidence(page([logRow({ body: 'cached' })]))
+      data: logEvidence(page([logRow({ body: 'cached' })])),
+      window: cachedWindow,
+      revision: 0
     });
 
     const routed = renderController(['/explore?signal=logs&query=cached'], 0, client);
@@ -491,7 +510,9 @@ describe('Explore page controller', () => {
         evidence: {
           kind: 'ready',
           signal: 'logs',
-          data: { content: [{ body: 'cached' }] }
+          data: { content: [{ body: 'cached' }] },
+          window: cachedWindow,
+          revision: 0
         }
       })
     );
@@ -503,11 +524,13 @@ describe('Explore page controller', () => {
   it('projects cached history as refreshing until a successful request atomically replaces it', async () => {
     const refresh = deferred<ReturnType<typeof logEvidence>>();
     api.loadLogSignal.mockReturnValue(refresh.promise);
-    const query: ExploreQuery = { signal: 'logs', timeRange: 'last-30m', query: 'cached' };
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const query = canonicalQuery('signal=logs&timeRange=last-30m&query=cached');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(exploreQueryKeys.history(query, undefined, 0), {
       signal: 'logs',
-      data: logEvidence(page([logRow({ body: 'cached' })]))
+      data: logEvidence(page([logRow({ body: 'cached' })])),
+      window: cachedWindow,
+      revision: 0
     });
 
     const routed = renderController(['/explore?signal=logs&query=cached'], 0, client);
@@ -515,7 +538,13 @@ describe('Explore page controller', () => {
     await waitFor(() =>
       expect(routed.current().result).toMatchObject({
         kind: 'refreshing',
-        evidence: { kind: 'ready', signal: 'logs', data: { content: [{ body: 'cached' }] } }
+        evidence: {
+          kind: 'ready',
+          signal: 'logs',
+          data: { content: [{ body: 'cached' }] },
+          window: cachedWindow,
+          revision: 0
+        }
       })
     );
     act(() => refresh.resolve(logEvidence(page([logRow({ body: 'fresh' })]))));
@@ -526,15 +555,18 @@ describe('Explore page controller', () => {
         data: { content: [{ body: 'fresh' }] }
       })
     );
+    expect(routed.current().result).not.toMatchObject({ window: cachedWindow });
   });
 
   it('retains cached history after refresh failure only as stale error evidence', async () => {
     api.loadLogSignal.mockRejectedValue(new Error('refresh failed'));
-    const query: ExploreQuery = { signal: 'logs', timeRange: 'last-30m', query: 'cached' };
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const query = canonicalQuery('signal=logs&timeRange=last-30m&query=cached');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(exploreQueryKeys.history(query, undefined, 0), {
       signal: 'logs',
-      data: logEvidence(page([logRow({ body: 'cached' })]))
+      data: logEvidence(page([logRow({ body: 'cached' })])),
+      window: cachedWindow,
+      revision: 0
     });
 
     const routed = renderController(['/explore?signal=logs&query=cached'], 0, client);
@@ -543,7 +575,13 @@ describe('Explore page controller', () => {
       expect(routed.current().result).toMatchObject({
         kind: 'stale_error',
         errorKind: 'error',
-        evidence: { kind: 'ready', signal: 'logs', data: { content: [{ body: 'cached' }] } }
+        evidence: {
+          kind: 'ready',
+          signal: 'logs',
+          data: { content: [{ body: 'cached' }] },
+          window: cachedWindow,
+          revision: 0
+        }
       })
     );
   });
@@ -579,16 +617,18 @@ describe('Explore page controller', () => {
 
   it('rejects cached history evidence owned by another signal', async () => {
     api.loadMetricSignal.mockReturnValue(new Promise<MetricConsole>(() => undefined));
-    const query: ExploreQuery = { signal: 'metrics', timeRange: 'last-30m' };
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const query = canonicalQuery('signal=metrics&timeRange=last-30m');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(exploreQueryKeys.history(query, undefined, 0), {
       signal: 'logs',
-      data: logEvidence(page([logRow({ body: 'wrong signal' })]))
+      data: logEvidence(page([logRow({ body: 'wrong signal' })])),
+      window: cachedWindow,
+      revision: 0
     });
 
     const routed = renderController(['/explore?signal=metrics'], 0, client);
 
-    await waitFor(() => expect(routed.current().result).toEqual({ kind: 'error' }));
+    await waitFor(() => expect(routed.current().result).toEqual({ kind: 'loading' }));
     routed.unmount();
   });
 });
@@ -642,6 +682,10 @@ function renderController(
   };
 }
 
+function canonicalQuery(search: string) {
+  return parseExploreQuery(new URLSearchParams(search));
+}
+
 function metricConsole(
   frames: NonNullable<NonNullable<MetricConsole['results']>['frames']>,
   override: Partial<MetricConsole> = {}
@@ -676,13 +720,17 @@ function logEvidence(data: ReturnType<typeof page>) {
         fatalCount: 0
       }
     },
-    trend: { kind: 'ready' as const, data: { hourlyStats: {} } }
+    trend: {
+      kind: 'ready' as const,
+      data: { start: 1_754_467_200_000, end: 1_754_469_000_000, intervalMs: 60_000, buckets: [] }
+    }
   };
 }
 function logRow(
   override: Partial<import('../model/explore-signal-contract').LogRow> = {}
 ): import('../model/explore-signal-contract').LogRow {
   return {
+    logRecordUid: null,
     timeUnixNano: null,
     observedTimeUnixNano: null,
     severityNumber: null,

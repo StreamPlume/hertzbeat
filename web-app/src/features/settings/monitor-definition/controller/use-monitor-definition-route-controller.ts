@@ -151,8 +151,24 @@ function useMonitorDefinitionWorkspaceRoute(
   actions: RouteWorkspaceActions,
   route: RouteState
 ) {
+  const committed = useRef(false);
   useEffect(() => {
-    route.reconcile(queryApp, workspace, actions);
+    if (committed.current) {
+      route.reconcile(queryApp, workspace, actions);
+      return;
+    }
+    let current = true;
+    // Only the initial route-owned I/O waits for React 18 StrictMode's
+    // setup/cleanup replay. Later authority and navigation changes reconcile
+    // synchronously so they cannot be starved by unrelated rerenders.
+    queueMicrotask(() => {
+      if (!current) return;
+      committed.current = true;
+      route.reconcile(queryApp, workspace, actions);
+    });
+    return () => {
+      current = false;
+    };
   }, [actions, queryApp, route, workspace]);
 }
 

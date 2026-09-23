@@ -55,16 +55,34 @@ module.exports = {
       to: { path: '^src/(?:app|layout)/' }
     },
     {
+      name: 'no-platform-to-outer-source-layers',
+      severity: 'error',
+      from: { path: '^src/platform/', pathNot: productionSource },
+      to: { path: '^src/', pathNot: '^src/(?:platform|shared|core)/' }
+    },
+    {
+      name: 'perses-public-entry-only',
+      severity: 'error',
+      from: {
+        path: '^src/',
+        pathNot: `(?:${productionSource}|^src/platform/perses/)`
+      },
+      to: {
+        path: '^src/platform/perses/.+',
+        pathNot: '^src/platform/perses/index[.]tsx?$'
+      }
+    },
+    {
       name: 'no-shared-to-outer-layers',
       severity: 'error',
       from: { path: '^src/shared/', pathNot: productionSource },
-      to: { path: '^src/(?:app|layout|features)/' }
+      to: { path: '^src/(?:app|layout|features|platform)/' }
     },
     {
       name: 'no-core-to-outer-layers',
       severity: 'error',
       from: { path: '^src/core/', pathNot: productionSource },
-      to: { path: '^src/(?:app|layout|features|shared)/' }
+      to: { path: '^src/(?:app|layout|features|platform|shared)/' }
     },
     {
       name: 'no-layout-to-app',

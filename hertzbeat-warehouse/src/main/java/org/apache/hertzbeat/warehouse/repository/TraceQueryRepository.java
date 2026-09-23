@@ -30,6 +30,9 @@ import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailable
  */
 public interface TraceQueryRepository {
 
+    /** Maximum number of per-service aggregate rows returned for one trace-list page. */
+    int MAX_TRACE_LIST_SERVICE_ROWS = 4096;
+
     /**
      * Storage-neutral contract for an exact trace-row query.
      *

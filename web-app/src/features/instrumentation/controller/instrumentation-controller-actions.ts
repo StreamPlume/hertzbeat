@@ -4,7 +4,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { useCallback, type RefObject } from 'react';
+import { useCallback, type MutableRefObject } from 'react';
 
 import { renderInstrumentationGuide } from '../api/instrumentation-api';
 import {
@@ -25,9 +25,9 @@ export function useDraftActions(
   state: InstrumentationControllerState,
   catalog: CatalogResponse | undefined,
   defaultProfileId: string | undefined,
-  startedAtRef: RefObject<number | undefined>,
-  timerRef: RefObject<number | undefined>,
-  generationRef: RefObject<number>
+  startedAtRef: MutableRefObject<number | undefined>,
+  timerRef: MutableRefObject<number | undefined>,
+  generationRef: MutableRefObject<number>
 ) {
   const resetResults = useResetInstrumentationResults(state, generationRef, startedAtRef, timerRef);
   const chooseSource = useCallback(
@@ -75,9 +75,9 @@ export function useDraftActions(
 
 function useResetInstrumentationResults(
   state: InstrumentationControllerState,
-  generationRef: RefObject<number>,
-  startedAtRef: RefObject<number | undefined>,
-  timerRef: RefObject<number | undefined>
+  generationRef: MutableRefObject<number>,
+  startedAtRef: MutableRefObject<number | undefined>,
+  timerRef: MutableRefObject<number | undefined>
 ) {
   return useCallback(() => {
     if (state.tokenAcknowledgementRequiredRef.current) return false;
@@ -98,7 +98,10 @@ function useResetInstrumentationResults(
   }, [generationRef, startedAtRef, state, timerRef]);
 }
 
-function clearDetectionWindow(timerRef: RefObject<number | undefined>, startedAtRef: RefObject<number | undefined>) {
+function clearDetectionWindow(
+  timerRef: MutableRefObject<number | undefined>,
+  startedAtRef: MutableRefObject<number | undefined>
+) {
   if (timerRef.current) window.clearTimeout(timerRef.current);
   timerRef.current = undefined;
   startedAtRef.current = undefined;
@@ -124,8 +127,8 @@ function useBackAction(
 
 export function useGuideActions(
   state: InstrumentationControllerState,
-  generationRef: RefObject<number>,
-  startedAtRef: RefObject<number | undefined>
+  generationRef: MutableRefObject<number>,
+  startedAtRef: MutableRefObject<number | undefined>
 ) {
   const renderGuide = useCallback(async () => {
     const currentGeneration = generationRef.current;

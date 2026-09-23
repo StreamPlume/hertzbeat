@@ -336,6 +336,107 @@
       }
     },
     "explore": { "metrics": "メトリクスを検索", "logs": "ログを検索", "traces": "トレースを検索" },
+    "signals": {
+      "title": "エンティティシグナル調査",
+      "availability": "シグナルの可用性",
+      "invalidWindow": "24 時間以内の有効な時間範囲を選択してください。",
+      "openExplore": "Explore で開く",
+      "items": "{{count}} 件",
+      "traceDetail": "トレース詳細",
+      "boundMonitors": "バインド済みモニター",
+      "boundMonitorsState": {
+        "unknown": "モニターのバインド証拠を利用できません。",
+        "empty": "バインド済みモニターはありません。"
+      },
+      "sections": {
+        "metrics": "メトリクス",
+        "logs": "ログ",
+        "traces": "トレース",
+        "topology": "トポロジー",
+        "collection": "収集",
+        "alerts": "アラート"
+      },
+      "states": { "available": "利用可能", "empty": "データなし", "unavailable": "利用不可", "unknown": "不明" },
+      "compact": {
+        "metrics": {
+          "empty": "この時間範囲に RED メトリクスはありません",
+          "unavailable": "RED メトリクスは利用できません",
+          "unknown": "RED メトリクスの可用性は不明です"
+        },
+        "redMetrics": {
+          "empty": "この時間範囲に RED メトリクスはなく、他のメトリクスソースは不明です",
+          "unavailable": "RED メトリクスは利用できず、他のメトリクスソースは不明です"
+        },
+        "logs": {
+          "empty": "この時間範囲にログはありません",
+          "unavailable": "ログは利用できません",
+          "unknown": "ログの可用性は不明です"
+        },
+        "traces": {
+          "empty": "この時間範囲にトレースはありません",
+          "unavailable": "トレースは利用できません",
+          "unknown": "トレースの可用性は不明です"
+        },
+        "topology": {
+          "empty": "関連エンティティはありません",
+          "unavailable": "トポロジーは利用できません",
+          "unknown": "トポロジーの可用性は不明です"
+        },
+        "collection": {
+          "empty": "この時間範囲に収集実行はありません",
+          "unavailable": "収集実行の証拠は利用できません",
+          "unknown": "このビューでは収集実行の証拠を利用できません"
+        },
+        "alerts": {
+          "empty": "この時間範囲にアラート証拠はありません",
+          "unavailable": "アラート証拠は利用できません",
+          "unknown": "時間範囲内のアラート証拠は不明です"
+        }
+      },
+      "red": {
+        "requestRate": "リクエスト率",
+        "errorRate": "エラー率",
+        "latencyP95": "P95 レイテンシ",
+        "requests": "リクエスト数"
+      },
+      "aria": {
+        "requestRate": "リクエスト率の可視化",
+        "errorRate": "エラー率の可視化",
+        "latencyP95": "P95 レイテンシの可視化",
+        "logs": "ログ証拠の可視化",
+        "traces": "トレース証拠の可視化",
+        "traceDetail": "トレース詳細の可視化"
+      },
+      "evidence": {
+        "title": "証拠",
+        "empty": "この時間範囲に関連付けられた証拠はありません。",
+        "greptimeFlow": "Greptime Flow · {{resolution}} 秒",
+        "reasons": {
+          "exact-span": "正確な Span",
+          "exact-trace": "正確な Trace",
+          "same-entity": "同じエンティティ",
+          "bound-monitor": "バインド済みモニター",
+          "canonical-otel-identity": "標準 OpenTelemetry ID",
+          "topology-related": "トポロジー関係",
+          "time-proximity": "時間的近接"
+        },
+        "confidence": { "exact": "完全一致", "high": "高い信頼度", "medium": "中程度の信頼度", "low": "低い信頼度" }
+      },
+      "alertsCurrentOnly": "現在のアクティブアラート数は、選択した時間範囲の証拠として表示されません。",
+      "query": {
+        "loading": "シグナル証拠を読み込んでいます…",
+        "empty": "この時間範囲に証拠はありません。",
+        "truncated": "一致する証拠の制限された一部を表示しています。",
+        "truncationUnknown": "結果の完全性は不明です。",
+        "runtimeError": "可視化ランタイムはこの証拠を描画できませんでした。",
+        "investigationActions": "調査アクション（{{count}} 件）",
+        "invalid": "シグナル要求が無効です。",
+        "permission": "このシグナルを確認する権限がありません。",
+        "overloaded": "シグナルストレージが混雑しています。再試行してください。",
+        "unavailable": "シグナルストレージを利用できません。",
+        "contract": "シグナルストレージが無効な応答を返しました。"
+      }
+    },
     "topology": { "view": "トポロジーを表示" },
     "discovery": {
       "action": "リソースを検出",
@@ -501,6 +602,7 @@
     "datasource": "データソース",
     "queryMode": "クエリモード",
     "trend": "メトリクストレンド",
+    "chartUnavailable": "メトリクスチャートを表示できません。サンプルは下の表で確認できます。",
     "filter": "ラベル条件 key=value",
     "groupBy": "ラベルでグループ化",
     "aggregation": "集計",
@@ -516,6 +618,7 @@
   },
   "exploreLog": {
     "mode": "ログモード",
+    "history": "履歴",
     "query": "検索",
     "live": "ライブ",
     "detail": "ログ詳細",
@@ -544,6 +647,7 @@
     "overview": "ログ概要",
     "trend": "ログ傾向",
     "trendEmpty": "このクエリでは傾向の時間区分が返されませんでした。",
+    "trendInsufficient": "現在の時間範囲には 1 つの時間区分（{{count}} ログ）があります。",
     "statisticsUnavailable": "この統計領域を読み込めませんでした。",
     "statistics": {
       "total": "合計",
@@ -1438,6 +1542,94 @@
       "collapseCard": "パネルを折りたたむ",
       "expandCard": "パネルを展開",
       "resizeHistory": "履歴パネルの高さを変更"
+    }
+  },
+  "monitorSignals": {
+    "title": "モニターシグナルの証拠",
+    "availability": "シグナルの可用性",
+    "window": "調査ウィンドウ：{{start}} – {{end}} · {{timeZone}}",
+    "windowUnavailable": "調査ウィンドウを利用できません。",
+    "source": "ソース",
+    "capabilities": {
+      "nativeMetrics": "ネイティブメトリクス",
+      "currentAlerts": "現在のアラート",
+      "collection": "収集状態",
+      "boundEntity": "関連エンティティ",
+      "otlpEvidence": "OTLP 証拠"
+    },
+    "states": { "ready": "利用可能", "empty": "データなし", "unavailable": "利用不可", "unknown": "不明" },
+    "sections": {
+      "currentAlerts": "現在のアラート",
+      "collectionHealth": "収集状態",
+      "boundEntity": "関連エンティティ",
+      "otelEvidence": "関連 OTLP 証拠"
+    },
+    "alerts": {
+      "scope": "現在の状態 · 選択ウィンドウの履歴ではありません",
+      "notRecorded": "記録なし",
+      "activeCount_one": "現在 {{count}} 件のアクティブアラート",
+      "activeCount_other": "現在 {{count}} 件のアクティブアラート",
+      "empty": "現在アクティブなアラートはありません。選択ウィンドウの履歴を示すものではありません。",
+      "unavailable": "現在のアラート証拠を利用できません。",
+      "unknown": "現在のアラート証拠は未確定です。"
+    },
+    "collection": {
+      "last": "最終収集",
+      "duration": "所要時間",
+      "outcome": "結果",
+      "collector": "コレクター",
+      "notRecorded": "記録なし",
+      "failurePhase": "失敗フェーズ",
+      "failureClass": "失敗クラス",
+      "empty": "この調査ウィンドウでは収集実行が観測されませんでした。",
+      "unavailable": "収集実行の証拠を利用できません。",
+      "unknown": "収集実行の証拠は未確定です。",
+      "outcomes": { "success": "成功", "failure": "失敗" },
+      "phases": {
+        "UNKNOWN": "不明なフェーズ",
+        "RESOLVE": "名前解決",
+        "CONNECT": "接続",
+        "AUTHENTICATE": "認証",
+        "QUERY": "クエリ",
+        "PARSE": "解析",
+        "CONVERT": "変換",
+        "DISPATCH": "配信"
+      },
+      "failureClasses": {
+        "NONE": "失敗なし",
+        "UNAVAILABLE": "利用不可",
+        "UNREACHABLE": "到達不能",
+        "UNCONNECTABLE": "接続失敗",
+        "COLLECTION": "収集失敗",
+        "TIMEOUT": "タイムアウト",
+        "UNKNOWN": "不明な失敗"
+      }
+    },
+    "entity": {
+      "serviceName": "サービス名",
+      "type": "エンティティ種別",
+      "id": "エンティティ ID",
+      "namespace": "サービス名前空間",
+      "environment": "環境",
+      "open": "エンティティを開く",
+      "empty": "このモニターはエンティティに関連付けられていません。",
+      "unavailable": "エンティティ関連付けの証拠を利用できません。",
+      "unknown": "エンティティ関連付けの証拠は未確定です。"
+    },
+    "otel": {
+      "scope": "この関連付けで実際に観測されたシグナルのみ利用できます。Explore では調査ウィンドウとタイムゾーンを維持します。",
+      "open": "Explore で{{signal}}を開く",
+      "empty": "この関連付けでは OTLP シグナルが観測されませんでした。",
+      "noEntity": "OTLP 証拠を安全に関連付けるにはエンティティが必要です。",
+      "unavailable": "関連 OTLP 証拠を利用できません。",
+      "unknown": "関連 OTLP 証拠は未確定です。"
+    },
+    "signals": { "metrics": "OTLP メトリクス", "logs": "ログ", "traces": "トレース" },
+    "sources": {
+      "currentAlerts": "現在のアラート",
+      "collection": "Greptime 収集イベント",
+      "entityBinding": "モニターとエンティティの関連付け",
+      "otelBinding": "観測済み関連シグナル"
     }
   },
   "settingsNavigation": {
@@ -3083,6 +3275,7 @@
     },
     "summaryUnavailable": "アラート概要を利用できません。リストは引き続き検索できます。",
     "investigate": "調査",
+    "askAi": "AI に質問",
     "openMonitor": "モニター",
     "openEntity": "リソース",
     "listUnavailable": "アラート一覧を利用できません。",
@@ -3830,6 +4023,76 @@
       "apiKey": "API キー",
       "apiKeyHint": "空欄にすると既存のキーを維持します。",
       "save": "プロバイダーを保存"
+    }
+  },
+  "alertInvestigation": {
+    "title": "アラート調査",
+    "unnamedAlert": "名前のないアラート",
+    "exactWindow": "正確な時間範囲",
+    "anchor": "アラート基準時刻",
+    "availability": "エビデンスの可用性",
+    "notRecorded": "記録なし",
+    "sections": {
+      "metrics": "アラートメトリクス",
+      "logs": "ログ",
+      "traces": "トレース",
+      "topology": "トポロジー",
+      "collection": "収集状態"
+    },
+    "states": {
+      "available": "利用可能",
+      "empty": "この範囲にエビデンスはありません",
+      "unavailable": "エビデンスを利用できません"
+    },
+    "actions": {
+      "back": "アラートに戻る",
+      "retry": "再試行",
+      "openMetrics": "メトリクスを開く",
+      "openLog": "ログを開く",
+      "openTrace": "トレースを開く",
+      "openTopology": "トポロジーを開く"
+    },
+    "query": {
+      "loading": "正確なアラートエビデンスを読み込んでいます…",
+      "invalidRoute": "アラート調査 URL が不完全または無効です。",
+      "invalid": "エビデンスクエリが無効です。",
+      "permission": "このエビデンスを表示する権限がありません。",
+      "overloaded": "エビデンスサービスが過負荷です。",
+      "unavailable": "アラート調査を利用できません。",
+      "contract": "アラートエビデンスが期待される契約と一致しません。",
+      "runtimeError": "エビデンスランタイムで結果を表示できませんでした。",
+      "truncated": "制限された結果セットのみ表示しています。",
+      "truncationUnknown": "完全な結果数は不明です。"
+    },
+    "metrics": { "before": "前", "anchor": "アラート", "after": "後" },
+    "logs": { "focusActions": "フォーカスするログ" },
+    "traces": {
+      "traceId": "Trace ID",
+      "service": "サービス",
+      "start": "開始",
+      "duration": "期間",
+      "status": "状態",
+      "spans": "Span 数"
+    },
+    "traceStatus": { "error": "エラー", "ok": "正常", "unset": "未設定", "unknown": "不明" },
+    "topology": {
+      "source": "ソース",
+      "target": "ターゲット",
+      "relation": "関係",
+      "confidence": "信頼度",
+      "requests": "リクエスト",
+      "errors": "エラー"
+    },
+    "collection": {
+      "lastCollection": "最終収集",
+      "duration": "期間",
+      "outcome": "結果",
+      "collector": "コレクター",
+      "target": "ターゲット",
+      "metricSet": "メトリクスセット",
+      "failureClass": "障害クラス",
+      "phase": "フェーズ",
+      "notRecorded": "記録なし"
     }
   },
   "aiSchedules": {

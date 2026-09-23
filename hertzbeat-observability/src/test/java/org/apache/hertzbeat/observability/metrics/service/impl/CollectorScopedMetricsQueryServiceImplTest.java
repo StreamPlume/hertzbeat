@@ -20,14 +20,19 @@ package org.apache.hertzbeat.observability.metrics.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
+import java.util.List;
+import org.apache.hertzbeat.common.entity.dto.query.DatasourceQueryData;
 import org.apache.hertzbeat.common.observability.dto.metrics.OtlpMetricsConsoleDto;
 import org.apache.hertzbeat.common.observability.dto.metrics.OtlpMetricsInventoryDto;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.observability.ingestion.service.OtlpIngestionWorkspaceService;
 import org.apache.hertzbeat.observability.metrics.service.CollectorScopedMetricsQueryService;
+import org.apache.hertzbeat.observability.shared.query.ObservabilityQueryRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,10 +56,10 @@ class CollectorScopedMetricsQueryServiceImplTest {
     void scopesGeneratedMetricQueryThroughCanonicalCollectorLabel() {
         OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto();
         result.setContext(new OtlpMetricsConsoleDto.Context());
-        when(workspaceService.getMetricsConsole(
+        when(workspaceService.getBoundedMetricsConsole(
                 "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod",
                 "collector-a", null, null, "http_server_duration", "span_kind=server",
-                null, null, null, "60s", null, null)).thenReturn(result);
+                null, "sum", "raw", "60", "32", null)).thenReturn(result);
 
         OtlpMetricsConsoleDto actual = service.query(request("collector-a", "http_server_duration"));
 
@@ -85,31 +90,24 @@ class CollectorScopedMetricsQueryServiceImplTest {
 
     @Test
     void scopesDefaultQueryAndPreservesExistingFilter() {
-        OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto();
-        result.setContext(new OtlpMetricsConsoleDto.Context());
-        when(workspaceService.getMetricsConsole(
-                "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod",
-                "collector-east", null, null, null, "span_kind=server",
-                null, null, null, "60s", null, null)).thenReturn(result);
-
-        OtlpMetricsConsoleDto actual = service.query(request("collector-east", null));
-
-        assertEquals("collector-east", actual.getContext().getCollectorId());
+        assertThrows(ObservabilityQueryRequestException.class,
+                () -> service.query(request("collector-east", null)));
+        verifyNoInteractions(workspaceService);
     }
 
     @Test
     void scopesInstanceAndHttpRouteThroughCanonicalMetricLabels() {
         OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto();
         result.setContext(new OtlpMetricsConsoleDto.Context());
-        when(workspaceService.getMetricsConsole(
+        when(workspaceService.getBoundedMetricsConsole(
                 "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod",
                 "collector-a", "checkout-7d9", "/checkout", "http_server_duration", "span_kind=server",
-                null, null, null, "60s", null, null)).thenReturn(result);
+                null, "sum", "raw", "60", "32", null)).thenReturn(result);
 
         OtlpMetricsConsoleDto actual = service.query(new CollectorScopedMetricsQueryService.Request(
                 "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod", "collector-a",
                 "checkout-7d9", "/checkout", "http_server_duration", "span_kind=server",
-                null, null, null, "60s", null, null));
+                null, null, null, "60", null, null));
 
         assertEquals("checkout-7d9", actual.getContext().getInstance());
         assertEquals("/checkout", actual.getContext().getEndpoint());
@@ -130,10 +128,10 @@ class CollectorScopedMetricsQueryServiceImplTest {
     void blankCollectorKeepsLegacyRequestUnchanged() {
         OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto();
         result.setContext(new OtlpMetricsConsoleDto.Context());
-        when(workspaceService.getMetricsConsole(
+        when(workspaceService.getBoundedMetricsConsole(
                 "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod",
                 null, null, null, "http_server_duration", "span_kind=server",
-                null, null, null, "60s", null, null)).thenReturn(result);
+                null, "sum", "raw", "60", "32", null)).thenReturn(result);
 
         OtlpMetricsConsoleDto actual = service.query(request(" ", "http_server_duration"));
 
@@ -142,12 +140,129 @@ class CollectorScopedMetricsQueryServiceImplTest {
 
     @Test
     void rejectsArbitraryPromqlInsteadOfDroppingCollectorScope() {
-        OtlpMetricsConsoleDto result = service.query(request("collector-a", "sum(rate(http_requests_total[5m]))"));
+        ObservabilityQueryRequestException failure = assertThrows(
+                ObservabilityQueryRequestException.class,
+                () -> service.query(request("collector-a", "sum(rate(http_requests_total[5m]))")));
 
-        assertEquals("unsupported_query", result.getEmptyStateReason());
-        assertEquals("collector-a", result.getContext().getCollectorId());
-        assertNull(result.getResults());
+        assertEquals(ObservabilityQueryRequestException.ERROR_CODE, failure.getMessage());
         verifyNoInteractions(workspaceService);
+    }
+
+    @Test
+    void requiresAnExactBoundedTimeWindowBeforeMetricsRead() {
+        CollectorScopedMetricsQueryService.Request baseline = request("collector-a", "http_server_duration");
+        for (CollectorScopedMetricsQueryService.Request invalid : List.of(
+                withWindow(baseline, null, 200L),
+                withWindow(baseline, 100L, null),
+                withWindow(baseline, 0L, 100L),
+                withWindow(baseline, 200L, 100L),
+                withWindow(baseline, 100L, 100L),
+                withWindow(baseline, 100L, 100L + Duration.ofDays(1).toMillis() + 1))) {
+            ObservabilityQueryRequestException failure = assertThrows(
+                    ObservabilityQueryRequestException.class, () -> service.query(invalid));
+            assertEquals(ObservabilityQueryRequestException.ERROR_CODE, failure.getMessage());
+        }
+        verifyNoInteractions(workspaceService);
+    }
+
+    @Test
+    void appliesServerOwnedSeriesAndPointBudgets() {
+        OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto();
+        result.setContext(new OtlpMetricsConsoleDto.Context());
+        when(workspaceService.getBoundedMetricsConsole(
+                "team-a", null, null, 1_000L, 86_401_000L, "checkout", "commerce", "prod",
+                "collector-a", null, null, "http_server_duration", "span_kind=server",
+                null, "sum", "raw", "73", "32", null)).thenReturn(result);
+
+        service.query(new CollectorScopedMetricsQueryService.Request(
+                "team-a", null, null, 1_000L, 86_401_000L, "checkout", "commerce", "prod",
+                "collector-a", null, null, "http_server_duration", "span_kind=server",
+                null, "SUM", "RAW", "1", "999", null));
+
+        verify(workspaceService).getBoundedMetricsConsole(
+                "team-a", null, null, 1_000L, 86_401_000L, "checkout", "commerce", "prod",
+                "collector-a", null, null, "http_server_duration", "span_kind=server",
+                null, "sum", "raw", "73", "32", null);
+    }
+
+    @Test
+    void rejectsUnallowlistedMetricQueryControls() {
+        CollectorScopedMetricsQueryService.Request baseline = request("collector-a", "http_server_duration");
+        for (CollectorScopedMetricsQueryService.Request invalid : List.of(
+                withControls(baseline, "sum) by (password) (", null, "60", "20"),
+                withControls(baseline, "sum", "predict_linear", "60", "20"),
+                withControls(baseline, "sum", "raw", "60ms", "20"),
+                withControls(baseline, "sum", "raw", "60", "not-a-number"))) {
+            assertThrows(ObservabilityQueryRequestException.class, () -> service.query(invalid));
+        }
+        verifyNoInteractions(workspaceService);
+    }
+
+    @Test
+    void redactsSuccessfulBackendMessages() {
+        Object[] row = {1_000L, 1.0};
+        DatasourceQueryData.SchemaData frame = new DatasourceQueryData.SchemaData(
+                new DatasourceQueryData.MetricSchema(List.of(), java.util.Map.of(), java.util.Map.of()),
+                List.<Object[]>of(row));
+        OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto(
+                new OtlpMetricsConsoleDto.Context(), null, "Greptime-promql", "promql",
+                new DatasourceQueryData("A", 200, "jdbc:greptime://private?password=secret", List.of(frame)),
+                new OtlpMetricsConsoleDto.Stats(1, 1, 1_000L), null, "private successful diagnostic");
+        when(workspaceService.getBoundedMetricsConsole(
+                "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod", "collector-a", null, null,
+                "http_server_duration", "span_kind=server", null, "sum", "raw", "60", "32", null))
+                .thenReturn(result);
+
+        OtlpMetricsConsoleDto actual = service.query(request("collector-a", "http_server_duration"));
+
+        assertNull(actual.getResults().getMsg());
+        assertNull(actual.getErrorMessage());
+    }
+
+    @Test
+    void redactsStorageDiagnosticsWhenTheResultPayloadIsAbsent() {
+        OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto(
+                new OtlpMetricsConsoleDto.Context(), null, null, "promql", null,
+                new OtlpMetricsConsoleDto.Stats(0, 0, null), "load_failed",
+                "jdbc:greptime://private?password=secret");
+        when(workspaceService.getBoundedMetricsConsole(
+                "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod", "collector-a", null, null,
+                "http_server_duration", "span_kind=server", null, "sum", "raw", "60", "32", null))
+                .thenReturn(result);
+
+        OtlpMetricsConsoleDto actual = service.query(request("collector-a", "http_server_duration"));
+
+        assertNull(actual.getErrorMessage());
+        assertNull(actual.getResults());
+    }
+
+    @Test
+    void failsClosedWhenTheDatasourceViolatesTheSeriesOrPointBudget() {
+        Object[] row = {1_000L, 1.0};
+        DatasourceQueryData.SchemaData oversizedFrame = new DatasourceQueryData.SchemaData(
+                new DatasourceQueryData.MetricSchema(List.of(), java.util.Map.of(), java.util.Map.of()),
+                java.util.stream.IntStream.range(0, 1_201).mapToObj(ignored -> row).toList());
+        OtlpMetricsConsoleDto result = new OtlpMetricsConsoleDto(
+                new OtlpMetricsConsoleDto.Context(), null, "Greptime-promql", "promql",
+                new DatasourceQueryData("A", 200, null, List.of(oversizedFrame)),
+                new OtlpMetricsConsoleDto.Stats(1, 1, 1_000L), null, null);
+        DatasourceQueryData.SchemaData boundedFrame = new DatasourceQueryData.SchemaData(
+                oversizedFrame.getSchema(), List.<Object[]>of(row));
+        OtlpMetricsConsoleDto oversizedSeries = new OtlpMetricsConsoleDto(
+                new OtlpMetricsConsoleDto.Context(), null, "Greptime-promql", "promql",
+                new DatasourceQueryData(
+                        "A", 200, null,
+                        java.util.stream.IntStream.range(0, 33).mapToObj(ignored -> boundedFrame).toList()),
+                new OtlpMetricsConsoleDto.Stats(33, 33, 1_000L), null, null);
+        when(workspaceService.getBoundedMetricsConsole(
+                "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod", "collector-a", null, null,
+                "http_server_duration", "span_kind=server", null, "sum", "raw", "60", "32", null))
+                .thenReturn(result, oversizedSeries);
+
+        assertThrows(TelemetryStorageUnavailableException.class,
+                () -> service.query(request("collector-a", "http_server_duration")));
+        assertThrows(TelemetryStorageUnavailableException.class,
+                () -> service.query(request("collector-a", "http_server_duration")));
     }
 
     @Test
@@ -189,6 +304,25 @@ class CollectorScopedMetricsQueryServiceImplTest {
     private CollectorScopedMetricsQueryService.Request request(String collectorId, String query) {
         return new CollectorScopedMetricsQueryService.Request(
                 "team-a", null, null, 100L, 200L, "checkout", "commerce", "prod", collectorId, null, null, query,
-                "span_kind=server", null, null, null, "60s", null, null);
+                "span_kind=server", null, null, null, "60", null, null);
+    }
+
+    private CollectorScopedMetricsQueryService.Request withWindow(
+            CollectorScopedMetricsQueryService.Request request, Long start, Long end) {
+        return new CollectorScopedMetricsQueryService.Request(
+                request.workspaceId(), request.entityId(), request.entityType(), start, end, request.serviceName(),
+                request.serviceNamespace(), request.environment(), request.collectorId(), request.instance(),
+                request.endpoint(), request.query(), request.filter(), request.groupBy(), request.aggregation(),
+                request.temporalAggregation(), request.step(), request.limit(), request.operationName());
+    }
+
+    private CollectorScopedMetricsQueryService.Request withControls(
+            CollectorScopedMetricsQueryService.Request request, String aggregation, String temporalAggregation,
+            String step, String limit) {
+        return new CollectorScopedMetricsQueryService.Request(
+                request.workspaceId(), request.entityId(), request.entityType(), request.start(), request.end(),
+                request.serviceName(), request.serviceNamespace(), request.environment(), request.collectorId(),
+                request.instance(), request.endpoint(), request.query(), request.filter(), request.groupBy(), aggregation,
+                temporalAggregation, step, limit, request.operationName());
     }
 }

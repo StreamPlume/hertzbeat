@@ -19,6 +19,7 @@ package org.apache.hertzbeat.observability.ingestion.controller;
 
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -252,7 +253,8 @@ class OtlpIngestionControllerTest {
                 null
         );
         when(collectorScopedMetricsQueryService.query(argThat(request ->
-                "collector-a".equals(request.collectorId()) && "checkout".equals(request.serviceName())
+                "team-a".equals(request.workspaceId()) && "collector-a".equals(request.collectorId())
+                        && "checkout".equals(request.serviceName())
                         && "checkout-7d9".equals(request.instance()) && "/checkout".equals(request.endpoint()))))
                 .thenReturn(console);
 
@@ -261,6 +263,8 @@ class OtlpIngestionControllerTest {
                         .param("entityType", "service")
                         .param("start", "1000")
                         .param("end", "2000")
+                        .param("query", "http_server_request_duration_count")
+                        .param("workspaceId", "team-b")
                         .param("serviceName", "checkout")
                         .param("serviceNamespace", "commerce")
                         .param("environment", "prod")
@@ -284,11 +288,31 @@ class OtlpIngestionControllerTest {
                 .andExpect(jsonPath("$.data.results.frames[0].schema.labels.__name__").value("http_server_requests_seconds_count"));
 
         verify(collectorScopedMetricsQueryService).query(argThat(request ->
-                "collector-a".equals(request.collectorId())
+                "team-a".equals(request.workspaceId())
+                        && "http_server_request_duration_count".equals(request.query())
+                        && "collector-a".equals(request.collectorId())
                         && "checkout-7d9".equals(request.instance())
                         && "/checkout".equals(request.endpoint())
                         && "span.kind=\"server\"".equals(request.filter())
                         && "POST /checkout".equals(request.operationName())));
+    }
+
+    @Test
+    void metricsConsoleRequiresTheExactTypedRangeAndMetricContract() throws Exception {
+        mockMvc.perform(get("/api/ingestion/otlp/metrics/console")
+                        .param("end", "2000")
+                        .param("query", "http_server_request_duration_count"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/ingestion/otlp/metrics/console")
+                        .param("start", "1000")
+                        .param("query", "http_server_request_duration_count"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/ingestion/otlp/metrics/console")
+                        .param("start", "1000")
+                        .param("end", "2000"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(collectorScopedMetricsQueryService);
     }
 
     @Test

@@ -40,6 +40,7 @@ import org.apache.hertzbeat.warehouse.repository.SemanticGraphQueryRepository.En
 import org.apache.hertzbeat.warehouse.repository.SemanticGraphQueryRepository.Relationship;
 import org.apache.hertzbeat.warehouse.repository.SemanticGraphQueryRepository.RelationshipQuery;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -70,6 +71,7 @@ public class EntitySemanticRelationQueryService {
     private final EntityWorkspaceAccessService entityWorkspaceAccessService;
     private final Clock clock;
 
+    @Autowired
     public EntitySemanticRelationQueryService(
             ObjectProvider<SemanticGraphQueryRepository> repositoryProvider,
             EntityIdentityQueryService entityIdentityQueryService,

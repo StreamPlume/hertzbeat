@@ -24,6 +24,7 @@ import ch.qos.logback.core.read.ListAppender;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.common.transaction.MetadataWriteAdmissionException;
+import org.apache.hertzbeat.observability.shared.query.ObservabilityQueryRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -140,6 +141,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void invalidObservabilityQueryReturnsStableBadRequest() throws Exception {
+        mockMvc.perform(MockMvcRequestBuilders.get("/invalid-observability-query"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString(ObservabilityQueryRequestException.ERROR_CODE)))
+                .andExpect(content().string(not(containsString(PRIVATE_SERIALIZATION_DETAIL))));
+    }
+
+    @Test
     void metadataWriteAdmissionFailureIsStableNoStoreServiceUnavailable() throws Exception {
         mockMvc.perform(MockMvcRequestBuilders.post("/metadata-write-maintenance"))
                 .andExpect(status().isServiceUnavailable())
@@ -177,6 +186,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/telemetry-storage-unavailable")
         void telemetryStorageUnavailable() {
             throw new TelemetryStorageUnavailableException();
+        }
+
+        @GetMapping("/invalid-observability-query")
+        void invalidObservabilityQuery() {
+            throw new ObservabilityQueryRequestException();
         }
 
         @org.springframework.web.bind.annotation.PostMapping("/metadata-write-maintenance")

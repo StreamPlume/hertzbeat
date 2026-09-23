@@ -35,7 +35,6 @@ import org.apache.hertzbeat.common.observability.dto.trace.TraceOverviewDto;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenRequestContext;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.observability.traces.service.EntityTraceQueryService;
-import org.apache.hertzbeat.observability.traces.service.EntityTraceQueryService.TraceDetailQuery;
 import org.apache.hertzbeat.warehouse.query.admission.ObservabilityQueryAdmissionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,16 +50,24 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 @ExtendWith(MockitoExtension.class)
 class TraceQueryControllerTest {
 
+    private static final String VALID_TRACE_ID = "0123456789abcdef0123456789abcdef";
+    private static final String SECOND_VALID_TRACE_ID = "fedcba9876543210fedcba9876543210";
+
     private MockMvc mockMvc;
 
     @Mock
     private EntityTraceQueryService entityTraceQueryService;
 
+    @Mock
+    private org.apache.hertzbeat.observability.investigation.service.TraceInvestigationReadModelService
+            investigationReadModelService;
+
     @BeforeEach
     void setUp() {
         AuthTokenRequestContext.bindWorkspaceId("team-a");
         TraceQueryController controller = new TraceQueryController(entityTraceQueryService,
-                new ObservabilityQueryAdmissionService(8, 8, 8, 4, 8, Duration.ofMillis(100)));
+                new ObservabilityQueryAdmissionService(8, 8, 8, 4, 8, Duration.ofMillis(100)),
+                investigationReadModelService);
         this.mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -77,8 +84,7 @@ class TraceQueryControllerTest {
                 "/api/traces/list",
                 "/api/traces/stats/overview",
                 "/api/traces/stats/group-by?groupBy=service",
-                "/api/traces/trace-7",
-                "/api/traces/trace-7/spans")) {
+                "/api/traces/0123456789abcdef0123456789abcdef?start=1000&end=2000")) {
             Exception exception = assertThrows(Exception.class, () -> mockMvc.perform(get(path)));
             Throwable rootCause = exception;
             while (rootCause.getCause() != null) {
@@ -90,9 +96,17 @@ class TraceQueryControllerTest {
     }
 
     @Test
+    void rejectsNonLowerHexSelectionBeforeInvestigationQuery() {
+        assertThrows(Exception.class, () -> mockMvc.perform(get(
+                "/api/traces/0123456789ABCDEF0123456789ABCDEF?start=1000&end=2000")));
+
+        verifyNoInteractions(investigationReadModelService);
+    }
+
+    @Test
     void shouldForwardHideInternalFilterToTraceListQuery() throws Exception {
         TraceListItemDto item = new TraceListItemDto(
-                "trace-1",
+                VALID_TRACE_ID,
                 "span-root",
                 "checkout",
                 "commerce",
@@ -101,10 +115,12 @@ class TraceQueryControllerTest {
                 "STATUS_CODE_OK",
                 1_710_000_000_000L,
                 0,
+                4L,
+                Map.of("checkout", new org.apache.hertzbeat.common.observability.dto.trace.TraceServiceStatsDto(4, 0)),
                 Map.of("service.name", "checkout")
         );
         when(entityTraceQueryService.queryTraceList(
-                "team-a", 1L, 100L, 200L, "trace-1", true, "checkout", "commerce", "prod",
+                "team-a", 1L, 100L, 200L, VALID_TRACE_ID, true, "checkout", "commerce", "prod",
                 "service.version=1.2.3 and hertzbeat.entity_type=\"service\" and hertzbeat.collector.id=\"collector-a\"", "GET /checkout",
                 100L, 500L, 2, 50, true, null, "http.route CONTAINS checkout"))
                 .thenReturn(new PageImpl<>(List.of(item), PageRequest.of(2, 50), 1));
@@ -113,7 +129,7 @@ class TraceQueryControllerTest {
                         .param("entityId", "1")
                         .param("start", "100")
                         .param("end", "200")
-                        .param("traceId", "trace-1")
+                        .param("traceId", VALID_TRACE_ID)
                         .param("entityType", "service")
                         .param("errorOnly", "true")
                         .param("serviceName", "checkout")
@@ -130,11 +146,12 @@ class TraceQueryControllerTest {
                         .param("pageSize", "50"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.content[0].traceId").value("trace-1"))
-                .andExpect(jsonPath("$.data.content[0].serviceName").value("checkout"));
+                .andExpect(jsonPath("$.data.content[0].traceId").value(VALID_TRACE_ID))
+                .andExpect(jsonPath("$.data.content[0].serviceName").value("checkout"))
+                .andExpect(jsonPath("$.data.content[0].spanCount").value(4));
 
         verify(entityTraceQueryService).queryTraceList(
-                "team-a", 1L, 100L, 200L, "trace-1", true, "checkout", "commerce", "prod",
+                "team-a", 1L, 100L, 200L, VALID_TRACE_ID, true, "checkout", "commerce", "prod",
                 "service.version=1.2.3 and hertzbeat.entity_type=\"service\" and hertzbeat.collector.id=\"collector-a\"", "GET /checkout",
                 100L, 500L, 2, 50, true, null, "http.route CONTAINS checkout");
     }
@@ -142,7 +159,7 @@ class TraceQueryControllerTest {
     @Test
     void shouldForwardSpanScopeToTraceListQuery() throws Exception {
         TraceListItemDto item = new TraceListItemDto(
-                "trace-entry",
+                SECOND_VALID_TRACE_ID,
                 "span-entry",
                 "checkout",
                 "commerce",
@@ -151,6 +168,8 @@ class TraceQueryControllerTest {
                 "STATUS_CODE_OK",
                 1_710_000_000_000L,
                 0,
+                1L,
+                Map.of("checkout", new org.apache.hertzbeat.common.observability.dto.trace.TraceServiceStatsDto(1, 0)),
                 Map.of("service.name", "checkout")
         );
         when(entityTraceQueryService.queryTraceList(
@@ -170,11 +189,137 @@ class TraceQueryControllerTest {
                         .param("spanScope", "entrypoint"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.content[0].traceId").value("trace-entry"));
+                .andExpect(jsonPath("$.data.content[0].traceId").value(SECOND_VALID_TRACE_ID));
 
         verify(entityTraceQueryService).queryTraceList(
                 "team-a", null, 100L, 200L, null, false, "checkout", null, "prod",
                 null, "POST /checkout", 100L, 500L, 0, 20, null, "entrypoint", null);
+    }
+
+    @Test
+    void traceListFailsClosedWhenSpanCompletenessEvidenceIsMissing() {
+        TraceListItemDto incomplete = new TraceListItemDto(
+                VALID_TRACE_ID,
+                "span-root",
+                "checkout",
+                "commerce",
+                "GET /checkout",
+                2_000_000L,
+                "STATUS_CODE_OK",
+                1_710_000_000_000L,
+                0,
+                null,
+                null,
+                Map.of("service.name", "checkout")
+        );
+        when(entityTraceQueryService.queryTraceList(
+                "team-a", null, 100L, 200L, null, null, null, null, null,
+                null, null, null, null, 0, 20, null, null, null))
+                .thenReturn(new PageImpl<>(List.of(incomplete), PageRequest.of(0, 20), 1));
+
+        Exception exception = assertThrows(Exception.class, () -> mockMvc.perform(get("/api/traces/list")
+                .param("start", "100")
+                .param("end", "200")));
+
+        assertInstanceOf(TelemetryStorageUnavailableException.class, rootCause(exception));
+    }
+
+    @Test
+    void traceListFailsClosedWhenServiceStatsDoNotMatchTraceTotals() {
+        TraceListItemDto inconsistent = new TraceListItemDto(
+                VALID_TRACE_ID,
+                "span-root",
+                "checkout",
+                "commerce",
+                "GET /checkout",
+                2_000_000L,
+                "STATUS_CODE_ERROR",
+                1_710_000_000_000L,
+                1,
+                3L,
+                Map.of("checkout",
+                        new org.apache.hertzbeat.common.observability.dto.trace.TraceServiceStatsDto(2, 1)),
+                Map.of("service.name", "checkout")
+        );
+        when(entityTraceQueryService.queryTraceList(
+                "team-a", null, 100L, 200L, null, null, null, null, null,
+                null, null, null, null, 0, 20, null, null, null))
+                .thenReturn(new PageImpl<>(List.of(inconsistent), PageRequest.of(0, 20), 1));
+
+        Exception exception = assertThrows(Exception.class, () -> mockMvc.perform(get("/api/traces/list")
+                .param("start", "100")
+                .param("end", "200")));
+
+        assertInstanceOf(TelemetryStorageUnavailableException.class, rootCause(exception));
+    }
+
+    @Test
+    void traceListFailsClosedWhenCountsCannotBeRepresentedByStrictWireContract() {
+        TraceListItemDto oversized = new TraceListItemDto(
+                VALID_TRACE_ID,
+                "span-root",
+                "checkout",
+                "commerce",
+                "GET /checkout",
+                2_000_000L,
+                "STATUS_CODE_OK",
+                1_710_000_000_000L,
+                0,
+                Long.MAX_VALUE,
+                Map.of("checkout",
+                        new org.apache.hertzbeat.common.observability.dto.trace.TraceServiceStatsDto(
+                                Long.MAX_VALUE, 0)),
+                Map.of("service.name", "checkout")
+        );
+        when(entityTraceQueryService.queryTraceList(
+                "team-a", null, 100L, 200L, null, null, null, null, null,
+                null, null, null, null, 0, 20, null, null, null))
+                .thenReturn(new PageImpl<>(List.of(oversized), PageRequest.of(0, 20), 1));
+
+        Exception exception = assertThrows(Exception.class, () -> mockMvc.perform(get("/api/traces/list")
+                .param("start", "100")
+                .param("end", "200")));
+
+        assertInstanceOf(TelemetryStorageUnavailableException.class, rootCause(exception));
+    }
+
+    @Test
+    void traceListFailsClosedWhenIdentityOrTimingCannotSatisfyStrictWireContract() {
+        TraceListItemDto uppercaseTraceId = completeTraceListItem();
+        uppercaseTraceId.setTraceId("0123456789ABCDEF0123456789ABCDEF");
+        TraceListItemDto shortTraceId = completeTraceListItem();
+        shortTraceId.setTraceId("0123456789abcdef");
+        TraceListItemDto missingRootService = completeTraceListItem();
+        missingRootService.setServiceName(null);
+        TraceListItemDto blankRootName = completeTraceListItem();
+        blankRootName.setRootSpanName(" ");
+        TraceListItemDto missingStart = completeTraceListItem();
+        missingStart.setStartTime(null);
+        TraceListItemDto nonPositiveStart = completeTraceListItem();
+        nonPositiveStart.setStartTime(0L);
+        TraceListItemDto oversizedStart = completeTraceListItem();
+        oversizedStart.setStartTime(9_007_199_254_740_992L);
+        TraceListItemDto missingDuration = completeTraceListItem();
+        missingDuration.setDurationNanos(null);
+        TraceListItemDto negativeDuration = completeTraceListItem();
+        negativeDuration.setDurationNanos(-1L);
+        TraceListItemDto oversizedDuration = completeTraceListItem();
+        oversizedDuration.setDurationNanos(9_007_199_254_740_992L);
+
+        for (TraceListItemDto malformed : List.of(
+                uppercaseTraceId, shortTraceId, missingRootService, blankRootName, missingStart, nonPositiveStart,
+                oversizedStart, missingDuration, negativeDuration, oversizedDuration)) {
+            when(entityTraceQueryService.queryTraceList(
+                    "team-a", null, 100L, 200L, null, null, null, null, null,
+                    null, null, null, null, 0, 20, null, null, null))
+                    .thenReturn(new PageImpl<>(List.of(malformed), PageRequest.of(0, 20), 1));
+
+            Exception exception = assertThrows(Exception.class, () -> mockMvc.perform(get("/api/traces/list")
+                    .param("start", "100")
+                    .param("end", "200")));
+
+            assertInstanceOf(TelemetryStorageUnavailableException.class, rootCause(exception));
+        }
     }
 
     @Test
@@ -202,69 +347,30 @@ class TraceQueryControllerTest {
                 "http.route=\"/checkout\"");
     }
 
-    @Test
-    void shouldForwardVerifiedContextToTraceDetailQuery() throws Exception {
-        TraceDetailQuery query = new TraceDetailQuery(
-                7L,
-                "trace-7",
-                "span-7",
-                100L,
-                200L,
-                "checkout",
-                "commerce",
-                "prod",
-                "hertzbeat.collector.id=\"collector-a\" and service.instance.id=\"checkout-7d9\"",
-                "http.route=\"/checkout\"",
-                10L,
-                500L);
-
-        mockMvc.perform(get("/api/traces/trace-7")
-                        .param("entityId", "7")
-                        .param("start", "100")
-                        .param("end", "200")
-                        .param("spanId", "span-7")
-                        .param("serviceName", "checkout")
-                        .param("serviceNamespace", "commerce")
-                        .param("environment", "prod")
-                        .param("collectorId", "collector-a")
-                        .param("instance", "checkout-7d9")
-                        .param("endpoint", "/checkout")
-                        .param("minDurationMs", "10")
-                        .param("maxDurationMs", "500"))
-                .andExpect(status().isOk());
-
-        verify(entityTraceQueryService).getTraceDetail("team-a", query);
+    private static Throwable rootCause(Throwable throwable) {
+        Throwable result = throwable;
+        while (result.getCause() != null) {
+            result = result.getCause();
+        }
+        return result;
     }
 
-    @Test
-    void shouldNotBypassVerifiedContextWhenQueryingTraceSpans() throws Exception {
-        TraceDetailQuery query = new TraceDetailQuery(
-                7L,
-                "trace-7",
+    private static TraceListItemDto completeTraceListItem() {
+        return new TraceListItemDto(
+                VALID_TRACE_ID,
                 null,
-                100L,
-                200L,
                 "checkout",
                 "commerce",
-                "prod",
-                "hertzbeat.collector.id=\"collector-a\" and service.instance.id=\"checkout-7d9\"",
-                "http.route=\"/checkout\"",
-                null,
-                null);
-
-        mockMvc.perform(get("/api/traces/trace-7/spans")
-                        .param("entityId", "7")
-                        .param("start", "100")
-                        .param("end", "200")
-                        .param("serviceName", "checkout")
-                        .param("serviceNamespace", "commerce")
-                        .param("environment", "prod")
-                        .param("collectorId", "collector-a")
-                        .param("instance", "checkout-7d9")
-                        .param("endpoint", "/checkout"))
-                .andExpect(status().isOk());
-
-        verify(entityTraceQueryService).getTraceDetail("team-a", query);
+                "GET /checkout",
+                0L,
+                "STATUS_CODE_OK",
+                1_710_000_000_000L,
+                0,
+                1L,
+                Map.of("checkout",
+                        new org.apache.hertzbeat.common.observability.dto.trace.TraceServiceStatsDto(1, 0)),
+                Map.of("service.name", "checkout")
+        );
     }
 
     @Test

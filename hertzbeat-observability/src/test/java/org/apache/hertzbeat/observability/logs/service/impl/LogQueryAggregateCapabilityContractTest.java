@@ -28,6 +28,8 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.stream.Stream;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrend;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.HistoryDataReader;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -38,6 +40,9 @@ import org.mockito.invocation.Invocation;
 class LogQueryAggregateCapabilityContractTest {
 
     private static final String WORKSPACE = "team-a";
+    private static final long LOG_TIME_NANOS = 1_734_005_477_630_000_000L;
+    private static final long TREND_START_MS = Math.floorDiv(LOG_TIME_NANOS / 1_000_000L, 60_000L) * 60_000L;
+    private static final long TREND_END_MS = TREND_START_MS + 30 * 60_000L;
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("statOperations")
@@ -45,7 +50,7 @@ class LogQueryAggregateCapabilityContractTest {
         HistoryDataReader reader = aggregateUnsupportedReader(List.of(logEntry()));
         LogQueryServiceImpl service = new LogQueryServiceImpl(List.of(reader));
 
-        Map<String, Object> result = operation.invoke(service);
+        Object result = operation.invoke(service);
 
         operation.assertRowResult(result);
         assertOnlyScopedRowCalls(reader, 1);
@@ -58,7 +63,7 @@ class LogQueryAggregateCapabilityContractTest {
         HistoryDataReader second = aggregateUnsupportedReader(List.of(logEntry()));
         LogQueryServiceImpl service = new LogQueryServiceImpl(List.of(first, second));
 
-        Map<String, Object> result = operation.invoke(service);
+        Object result = operation.invoke(service);
 
         operation.assertRowResult(result);
         assertOnlyScopedRowCalls(first, 2);
@@ -71,7 +76,7 @@ class LogQueryAggregateCapabilityContractTest {
         HistoryDataReader reader = nativeAggregateReader(Map.of());
         LogQueryServiceImpl service = new LogQueryServiceImpl(List.of(reader));
 
-        Map<String, Object> result = operation.invoke(service);
+        Object result = operation.invoke(service);
 
         operation.assertEmptyNativeResult(result);
         assertOnlyScopedRowCalls(reader, 0);
@@ -92,28 +97,28 @@ class LogQueryAggregateCapabilityContractTest {
         return Stream.of(
                 new StatOperation("overview", LogQueryAggregateCapabilityContractTest::overview,
                         (result, empty) -> {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> values = (Map<String, Object>) result;
                             if (empty) {
-                                assertThat(result).isEmpty();
+                                assertThat(values).isEmpty();
                             } else {
-                                assertThat(result).containsEntry("totalCount", 1)
+                                assertThat(values).containsEntry("totalCount", 1)
                                         .containsEntry("errorCount", 1L);
                             }
                         }),
                 new StatOperation("trace coverage", LogQueryAggregateCapabilityContractTest::traceCoverage,
-                        (result, empty) -> assertThat(result.get("traceCoverage"))
+                        (result, empty) -> assertThat(((Map<?, ?>) result).get("traceCoverage"))
                                 .isEqualTo(empty ? Map.of() : Map.of(
                                         "withTrace", 1L,
                                         "withoutTrace", 0L,
                                         "withSpan", 1L,
                                         "withBothTraceAndSpan", 1L))),
                 new StatOperation("trend", LogQueryAggregateCapabilityContractTest::trend,
-                        (result, empty) -> {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Long> hourly = (Map<String, Long>) result.get("hourlyStats");
-                            assertThat(hourly.values()).containsExactlyElementsOf(empty ? List.of() : List.of(1L));
-                        }),
+                        (result, empty) -> assertThat(((LogTrend) result).buckets())
+                                .extracting(LogTrendBucket::count)
+                                .containsExactlyElementsOf(empty ? List.of() : List.of(1L))),
                 new StatOperation("group", LogQueryAggregateCapabilityContractTest::group,
-                        (result, empty) -> assertThat(result.get("groups")).isEqualTo(empty
+                        (result, empty) -> assertThat(((Map<?, ?>) result).get("groups")).isEqualTo(empty
                                 ? List.of()
                                 : List.of(Map.of("value", "checkout", "count", 1L)))));
     }
@@ -130,9 +135,9 @@ class LogQueryAggregateCapabilityContractTest {
                 false, false);
     }
 
-    private static Map<String, Object> trend(LogQueryServiceImpl service) {
+    private static LogTrend trend(LogQueryServiceImpl service) {
         return service.trendStats(WORKSPACE,
-                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, TREND_START_MS, TREND_END_MS, null, null, null, null, null, null, null, null, null, null,
                 false, false);
     }
 
@@ -162,6 +167,9 @@ class LogQueryAggregateCapabilityContractTest {
         return mock(HistoryDataReader.class, invocation -> {
             String methodName = invocation.getMethod().getName();
             if (methodName.startsWith("countLog")) {
+                if (methodName.equals("countLogsByInterval")) {
+                    return aggregate.isEmpty() ? List.of() : List.of(new LogTrendBucket(TREND_START_MS, 1L));
+                }
                 return aggregate;
             }
             if (methodName.startsWith("queryLogs")) {
@@ -173,7 +181,7 @@ class LogQueryAggregateCapabilityContractTest {
 
     private static LogEntry logEntry() {
         return LogEntry.builder()
-                .timeUnixNano(1_734_005_477_630_000_000L)
+                .timeUnixNano(LOG_TIME_NANOS)
                 .severityNumber(18)
                 .severityText("ERROR")
                 .traceId("trace-a")
@@ -195,20 +203,20 @@ class LogQueryAggregateCapabilityContractTest {
 
     @FunctionalInterface
     private interface StatsCall {
-        Map<String, Object> invoke(LogQueryServiceImpl service);
+        Object invoke(LogQueryServiceImpl service);
     }
 
-    private record StatOperation(String name, StatsCall call, BiConsumer<Map<String, Object>, Boolean> assertion) {
+    private record StatOperation(String name, StatsCall call, BiConsumer<Object, Boolean> assertion) {
 
-        Map<String, Object> invoke(LogQueryServiceImpl service) {
+        Object invoke(LogQueryServiceImpl service) {
             return call.invoke(service);
         }
 
-        void assertRowResult(Map<String, Object> result) {
+        void assertRowResult(Object result) {
             assertion.accept(result, false);
         }
 
-        void assertEmptyNativeResult(Map<String, Object> result) {
+        void assertEmptyNativeResult(Object result) {
             assertion.accept(result, true);
         }
 

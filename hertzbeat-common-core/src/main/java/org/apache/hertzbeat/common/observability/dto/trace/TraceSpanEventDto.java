@@ -30,7 +30,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class TraceSpanEventDto {
 
-    private Long timeUnixNano;
+    private String timeUnixNano;
 
     private String name;
 

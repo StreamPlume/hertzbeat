@@ -17,17 +17,9 @@
 
 import { z } from 'zod';
 
-import {
-  ExploreSignalContractError,
-  ExploreSignalMissingError,
-  type ExplorePageResult,
-  type TraceDetail,
-  type TraceRow,
-  type TraceSpan
-} from '../model/explore-signal-contract';
+import { ExploreSignalContractError, type ExplorePageResult, type TraceRow } from '../model/explore-signal-contract';
 import {
   nullableJavaLongSchema,
-  nullableJsonMapSchema,
   nullableNonNegativeIntegerSchema,
   nullableStringMapSchema,
   nullableStringSchema,
@@ -35,7 +27,7 @@ import {
   parseExplorePage
 } from './explore-wire-schema';
 
-const traceRowShape = {
+const traceSummaryShape = {
   traceId: z.string().min(1),
   rootSpanId: nullableStringSchema,
   serviceName: nullableStringSchema,
@@ -47,56 +39,40 @@ const traceRowShape = {
   errorSpanCount: nonNegativeIntegerSchema,
   resourceAttributes: nullableStringMapSchema
 };
-const traceRowSchema: z.ZodType<TraceRow> = z.object(traceRowShape);
-
-const traceEventSchema = z.object({
-  timeUnixNano: nullableJavaLongSchema,
-  name: nullableStringSchema,
-  attributes: nullableJsonMapSchema,
-  droppedAttributesCount: nullableNonNegativeIntegerSchema
-});
-
-const traceLinkSchema = z.object({
-  traceId: nullableStringSchema,
-  spanId: nullableStringSchema,
-  traceState: nullableStringSchema,
-  attributes: nullableJsonMapSchema,
-  droppedAttributesCount: nullableNonNegativeIntegerSchema
-});
-
-const codeNavigationHintSchema = z.object({
-  repositoryUrl: nullableStringSchema,
-  provider: nullableStringSchema,
-  defaultPath: nullableStringSchema,
-  searchQuery: nullableStringSchema,
-  label: nullableStringSchema
-});
-
-const traceSpanSchema: z.ZodType<TraceSpan> = z.object({
-  traceId: nullableStringSchema,
-  spanId: nullableStringSchema,
-  parentSpanId: nullableStringSchema,
-  spanName: nullableStringSchema,
-  serviceName: nullableStringSchema,
-  status: nullableStringSchema,
-  spanKind: nullableStringSchema,
-  statusMessage: nullableStringSchema,
-  traceState: nullableStringSchema,
-  scopeName: nullableStringSchema,
-  scopeVersion: nullableStringSchema,
-  durationNanos: nullableJavaLongSchema,
-  startTime: nullableNonNegativeIntegerSchema,
-  highlighted: z.boolean(),
-  resourceAttributes: nullableStringMapSchema,
-  spanAttributes: nullableStringMapSchema,
-  events: z.array(traceEventSchema).nullable(),
-  links: z.array(traceLinkSchema).nullable(),
-  codeNavigationHint: codeNavigationHintSchema.nullable()
-});
-
-const traceDetailSchema: z.ZodType<TraceDetail> = z.object({
-  ...traceRowShape,
-  spans: z.array(traceSpanSchema).nullable()
+const traceServiceStatSchema = z
+  .object({
+    spanCount: nonNegativeIntegerSchema.positive(),
+    errorCount: nonNegativeIntegerSchema
+  })
+  .refine(stat => stat.errorCount <= stat.spanCount);
+const traceServiceStatsSchema = z
+  .record(
+    z.string().refine(serviceName => serviceName.trim().length > 0),
+    traceServiceStatSchema
+  )
+  .refine(stats => Object.keys(stats).length > 0);
+const traceRowShape = {
+  ...traceSummaryShape,
+  spanCount: nonNegativeIntegerSchema.positive().nullable(),
+  serviceStats: traceServiceStatsSchema.nullable()
+};
+const traceRowSchema: z.ZodType<TraceRow> = z.object(traceRowShape).superRefine((row, context) => {
+  if ((row.spanCount === null) !== (row.serviceStats === null)) {
+    context.addIssue({ code: 'custom', message: 'Trace completeness evidence must be jointly available' });
+    return;
+  }
+  if (row.spanCount === null || row.serviceStats === null) return;
+  const stats = Object.values(row.serviceStats);
+  const spanTotal = stats.reduce((sum, stat) => sum + stat.spanCount, 0);
+  const errorTotal = stats.reduce((sum, stat) => sum + stat.errorCount, 0);
+  if (
+    !Number.isSafeInteger(spanTotal) ||
+    !Number.isSafeInteger(errorTotal) ||
+    spanTotal !== row.spanCount ||
+    errorTotal !== row.errorSpanCount
+  ) {
+    context.addIssue({ code: 'custom', message: 'Trace service statistics do not match trace totals' });
+  }
 });
 
 export function parseTracePage(value: unknown, pageIndex: number, pageSize: number): ExplorePageResult<TraceRow> {
@@ -106,41 +82,6 @@ export function parseTracePage(value: unknown, pageIndex: number, pageSize: numb
     'trace page contains duplicate traceId'
   );
   return page;
-}
-
-export function parseTraceDetail(value: unknown, expectedTraceId: string): TraceDetail {
-  if (value == null) throw new ExploreSignalMissingError();
-  const result = traceDetailSchema.safeParse(value);
-  if (!result.success) throw new ExploreSignalContractError();
-  const detail = result.data;
-  if (detail.traceId !== expectedTraceId) {
-    throw new ExploreSignalContractError('trace detail identity does not match request');
-  }
-  const spanIds: string[] = [];
-  for (const span of detail.spans ?? []) {
-    if (!span.spanId) throw new ExploreSignalContractError('trace spanId is required');
-    if (span.traceId !== null && span.traceId !== expectedTraceId) {
-      throw new ExploreSignalContractError('span traceId does not match request');
-    }
-    spanIds.push(span.spanId);
-  }
-  requireUnique(spanIds, 'trace detail contains duplicate spanId');
-  return detail;
-}
-
-export function parseTraceSpans(value: unknown, expectedTraceId: string): TraceSpan[] {
-  const result = z.array(traceSpanSchema).safeParse(value);
-  if (!result.success) throw new ExploreSignalContractError();
-  const spans = result.data;
-  const spanIds = spans.map(span => {
-    if (!span.spanId) throw new ExploreSignalContractError('trace spanId is required');
-    if (span.traceId !== null && span.traceId !== expectedTraceId) {
-      throw new ExploreSignalContractError('span traceId does not match request');
-    }
-    return span.spanId;
-  });
-  requireUnique(spanIds, 'trace detail contains duplicate spanId');
-  return spans;
 }
 
 function requireUnique(values: string[], message: string) {

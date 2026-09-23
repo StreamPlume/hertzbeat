@@ -34,7 +34,7 @@ export function MonitorRealtimeLayoutGrid({ state, actions, groups, renderGroup 
   const model = realtimeLayoutModel(state, groups, width);
   if (!mounted) {
     return (
-      <div ref={containerRef} className={workbenchStyles.realtimeGrid}>
+      <div ref={containerRef as RefObject<HTMLDivElement>} className={workbenchStyles.realtimeGrid}>
         {groups.map(group => (
           <div key={group.group}>{renderGroup(group, model.byGroup.get(group.group)!)}</div>
         ))}
@@ -87,7 +87,11 @@ function RealtimeGrid({
   model: ReturnType<typeof realtimeLayoutModel>;
 }) {
   return (
-    <div ref={containerRef} className={styles.realtimeLayoutHost} data-layout-viewport={model.viewport}>
+    <div
+      ref={containerRef as RefObject<HTMLDivElement>}
+      className={styles.realtimeLayoutHost}
+      data-layout-viewport={model.viewport}
+    >
       <ReactGridLayout
         width={width}
         layout={toGridLayout(model.projected, model.editable)}

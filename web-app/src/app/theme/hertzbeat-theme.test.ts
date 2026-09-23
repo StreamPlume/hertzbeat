@@ -24,8 +24,8 @@ describe('HertzBeat semantic theme', () => {
       colorLinkActive: '#b97bca',
       colorLinkHover: '#c18ad0',
       colorBgElevated: '#14171e',
-      borderRadius: 6,
-      borderRadiusLG: 8,
+      borderRadius: 5,
+      borderRadiusLG: 6,
       controlHeight: 32,
       fontSize: 13
     });

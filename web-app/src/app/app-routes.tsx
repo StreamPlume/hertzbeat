@@ -244,6 +244,13 @@ export const appRoutes: RouteObject[] = [
                 }
               },
               {
+                ...getAppRouteIdentity('alert-investigation'),
+                lazy: async () => {
+                  const { AlertInvestigationPage } = await import('@/features/alert/pages/alert-investigation-page');
+                  return { Component: AlertInvestigationPage };
+                }
+              },
+              {
                 ...getAppRouteIdentity('alert-rules'),
                 lazy: async () => {
                   const { AlertRuleListPage } = await import('@/features/alert/pages/alert-rule-list-page');

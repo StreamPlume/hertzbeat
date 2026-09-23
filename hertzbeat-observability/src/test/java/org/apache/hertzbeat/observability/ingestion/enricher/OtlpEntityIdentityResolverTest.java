@@ -103,11 +103,40 @@ class OtlpEntityIdentityResolverTest {
     }
 
     @Test
-    void doesNotResolveEntityWhenCanonicalEvidenceIsSplitAcrossEntities() {
+    void doesNotLetThreeWeakIdentityMatchesSilentlyOverrideOneStrongIdentityMatch() {
+        when(workspaceQueryGateway.findIdentitiesByKeysAndNormalizedValues(eq("prod-west"), anySet(), anySet()))
+                .thenReturn(List.of(
+                        identity(41L, "service.instance.id", "checkout-1", "checkout-1", 140, true),
+                        identity(42L, "service.name", "checkout", "checkout", 90, true),
+                        identity(42L, "service.namespace", "commerce", "commerce", 30, false),
+                        identity(42L, "deployment.environment.name", "prod", "prod", 20, false)));
+        when(workspaceQueryGateway.findEntitiesByIds("prod-west", Set.of(41L, 42L)))
+                .thenReturn(Map.of(
+                        41L, entity(41L, "prod-west", "service", "checkout-1", "Checkout Instance"),
+                        42L, entity(42L, "prod-west", "service", "checkout", "Checkout Service")));
+
+        Optional<String> resolved = resolver.resolveEntityId(Map.of(
+                "service.instance.id", "checkout-1",
+                "service.name", "checkout",
+                "service.namespace", "commerce",
+                "deployment.environment.name", "prod"), "prod-west");
+
+        assertTrue(resolved.isEmpty());
+        verify(workspaceQueryGateway).recordEntityDiscoveryGovernanceActivity(
+                eq("prod-west"),
+                eq("identity_conflict"),
+                eq("needs_governance"),
+                eq("OTLP resource identity matched multiple entities"),
+                org.mockito.ArgumentMatchers.contains("service.instance.id=checkout-1"),
+                eq(Map.of(41L, "Checkout Instance", 42L, "Checkout Service")));
+    }
+
+    @Test
+    void recordsConflictWhenTopWeightedEvidenceIsEqualAcrossEntities() {
         when(workspaceQueryGateway.findIdentitiesByKeysAndNormalizedValues(eq("prod-west"), anySet(), anySet()))
                 .thenReturn(List.of(
                         identity(41L, "service.name", "checkout", "checkout", 90, true),
-                        identity(41L, "deployment.environment.name", "prod", "prod", 20, false),
+                        identity(41L, "service.namespace", "commerce", "commerce", 30, false),
                         identity(42L, "service.name", "checkout", "checkout", 90, true),
                         identity(42L, "service.namespace", "commerce", "commerce", 30, false)));
         when(workspaceQueryGateway.findEntitiesByIds("prod-west", Set.of(41L, 42L)))

@@ -17,14 +17,14 @@
 
 import { useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 
-import { LIVE_LOG_RETENTION_LIMIT, type LogRow } from '../model/explore-signal-contract';
+import { LIVE_LOG_RETENTION_LIMIT, type LiveLogRow } from '../model/explore-signal-contract';
 import type { LiveLogStatus } from '../model/explore-signal-model';
 
 type ScopeState<T> = { scope: string; value: T };
 type LiveLogConnectionStatus = Exclude<LiveLogStatus, 'paused' | 'degraded'>;
 type EvidenceState = {
   scope: string;
-  rows: LogRow[];
+  rows: LiveLogRow[];
   integrity: 'complete' | 'degraded';
   gapDroppedCount: number | undefined;
   gapCountOverflowed: boolean;
@@ -87,7 +87,7 @@ export function degradeEvidence(setEvidenceState: EvidenceSetter, scope: string,
   });
 }
 
-export function appendLogEvidence(setEvidenceState: EvidenceSetter, scope: string, row: LogRow) {
+export function appendLogEvidence(setEvidenceState: EvidenceSetter, scope: string, row: LiveLogRow) {
   setEvidenceState(current => {
     const evidence = evidenceForScope(current, scope);
     return {

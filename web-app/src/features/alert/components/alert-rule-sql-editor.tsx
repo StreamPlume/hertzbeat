@@ -41,7 +41,7 @@ type AlertRuleSqlEditorProps = {
 export function AlertRuleSqlEditor({ ariaLabel, disabled, invalid, value, onChange }: AlertRuleSqlEditorProps) {
   const { t } = useTranslation();
   const hostRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView>(null);
+  const viewRef = useRef<EditorView | null>(null);
   const valueRef = useLatestValue(value);
   const onChangeRef = useLatestValue(onChange);
   const translationRef = useLatestValue(t);

@@ -73,7 +73,7 @@ export function ExploreActiveFilters({ query, t, updateQuery, removeFilter }: Pr
 }
 
 function activeFilter(value: unknown, key: keyof ExploreQueryPatch, label: string): ActiveFilter[] {
-  return value ? [{ key, label }] : [];
+  return value != null && value !== '' && value !== false ? [{ key, label }] : [];
 }
 
 function signalActiveFilters(query: ExploreQuery, t: TFunction): ActiveFilter[] {
@@ -84,13 +84,17 @@ function signalActiveFilters(query: ExploreQuery, t: TFunction): ActiveFilter[] 
         'operationName',
         t('explore.operationContext', { value: query.operationName })
       ),
+      ...contextFilter(query.metricFilter, 'metricFilter', t('exploreMetric.filter'), t),
+      ...contextFilter(query.groupBy, 'groupBy', t('exploreMetric.groupBy'), t),
+      ...contextFilter(query.aggregation, 'aggregation', t('exploreMetric.aggregation'), t),
       ...activeFilter(
         query.temporalAggregation,
         'temporalAggregation',
         t('exploreMetric.temporalAggregationContext', {
           value: t(`exploreMetric.temporalAggregationValues.${query.temporalAggregation}`)
         })
-      )
+      ),
+      ...contextFilter(query.step, 'step', t('exploreMetric.step'), t)
     ];
   }
   const trace = activeFilter(query.traceId, 'traceId', t('explore.traceIdContext', { value: query.traceId }));
@@ -99,12 +103,18 @@ function signalActiveFilters(query: ExploreQuery, t: TFunction): ActiveFilter[] 
       ...activeFilter(query.severityText, 'severityText', `${t('explore.severity')}: ${query.severityText}`),
       ...trace,
       ...activeFilter(query.spanId, 'spanId', t('explore.spanIdContext', { value: query.spanId })),
+      ...contextFilter(query.resourceFilter, 'resourceFilter', t('exploreLog.resourceFilter'), t),
+      ...contextFilter(query.attributeFilter, 'attributeFilter', t('exploreLog.attributeFilter'), t),
       ...activeFilter(query.hideInternal, 'hideInternal', t('exploreLog.hideInternal')),
       ...activeFilter(query.hideNoise, 'hideNoise', t('exploreLog.hideNoise'))
     ];
   }
   return [
     ...trace,
+    ...contextFilter(query.resourceFilter, 'resourceFilter', t('exploreLog.resourceFilter'), t),
+    ...contextFilter(query.attributeFilter, 'attributeFilter', t('exploreTrace.attributeFilter'), t),
+    ...contextFilter(query.minDurationMs, 'minDurationMs', t('exploreTrace.minDuration'), t),
+    ...contextFilter(query.maxDurationMs, 'maxDurationMs', t('exploreTrace.maxDuration'), t),
     ...activeFilter(query.errorOnly, 'errorOnly', t('exploreTrace.errorOnly')),
     ...activeFilter(
       query.spanScope,
@@ -115,4 +125,8 @@ function signalActiveFilters(query: ExploreQuery, t: TFunction): ActiveFilter[] 
     ),
     ...activeFilter(query.hideInternal, 'hideInternal', t('exploreTrace.hideInternal'))
   ];
+}
+
+function contextFilter(value: unknown, key: keyof ExploreQueryPatch, label: string, t: TFunction) {
+  return activeFilter(value, key, t('explore.filterContext', { label, value }));
 }

@@ -222,11 +222,18 @@ describe('AlertCenterPage', () => {
     expect(screen.getByText('alert.details.triggerTimes')).toBeInTheDocument();
     expect(screen.getByText('alert.details.startAt')).toBeInTheDocument();
     expect(screen.getByText('alert.details.activeAt')).toBeInTheDocument();
-    const investigate = screen.getByRole('link', { name: 'alert.investigate' });
-    expect(investigate).toHaveAttribute('href', expect.stringContaining('/ai?source=singleAlert&alertId=11'));
+    const investigate = screen.getByRole('link', { name: 'alert.investigate: Latency' });
+    expect(investigate).toHaveAttribute('href', expect.stringContaining('/alerts/11/investigate?'));
+    expect(investigate).toHaveAttribute('href', expect.stringContaining('start=1784249160000'));
+    expect(investigate).toHaveAttribute('href', expect.stringContaining('end=1784250960000'));
+    expect(investigate).toHaveAttribute('href', expect.stringContaining('timeZone='));
     expect(investigate).toHaveAttribute('href', expect.stringContaining('returnTo=%2Falerts%3Fstatus%3Dfiring'));
     expect(investigate.getAttribute('href')).not.toContain('password');
     expect(screen.getByRole('group', { name: 'alert.diagnosticActions' })).toContainElement(investigate);
+    expect(screen.getByRole('link', { name: 'alert.askAi' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/ai?source=singleAlert&alertId=11')
+    );
 
     fireEvent.click(expandDetails);
     expect(expandDetails).toHaveAccessibleName('alert.expandDetails');
@@ -272,7 +279,7 @@ describe('AlertCenterPage', () => {
       const link = screen.getByRole('link', { name: `explore.signals.${signal}` });
       expect(link).toHaveAttribute(
         'href',
-        `/explore?signal=${signal}&timeRange=last-30m&start=1784249100000&end=1784251020000` +
+        `/explore?signal=${signal}&timeRange=last-30m&start=1784249160000&end=1784250960000` +
           '&serviceName=checkout-api&serviceNamespace=commerce&environment=prod'
       );
     }

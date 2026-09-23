@@ -91,6 +91,8 @@ src/
     i18n/
     permissions/
   layout/              application shell, navigation, and header
+  platform/            third-party infrastructure adapters behind public entries
+    perses/
   features/
     <domain>/
       api/              endpoints, transport calls, wire schemas, DTO mapping
@@ -124,6 +126,8 @@ The permitted source-layer direction is:
 
 ```text
 app -> layout -> features -> shared -> core
+                  |
+                  +-> platform -> shared/core
 ```
 
 An outer layer may depend on an inner layer. An inner layer never imports an
@@ -132,6 +136,12 @@ outer layer. `assets` may be consumed where required.
 - `core` does not import `app`, `layout`, `features`, or `shared`.
 - `shared` may import `core`, but not `app`, `layout`, or `features`.
 - `features` may import `shared` and `core`, but not `app` or `layout`.
+- `platform` adapters may import their own modules, `shared`, and `core`, but
+  never `app`, `layout`, or `features`. Third-party runtime integration stays
+  inside the owning adapter.
+- Features consume a platform adapter only through its public
+  `@/platform/<adapter>` index; production code outside an adapter never imports
+  that adapter's internals.
 - `layout` may import feature public APIs, `shared`, and `core`, but not feature
   internals.
 - `app` wires providers, routes, layout, and feature public APIs. Business rules

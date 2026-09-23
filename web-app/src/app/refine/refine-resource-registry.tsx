@@ -167,7 +167,8 @@ const staticRefineResources: ResourceProps[] = [
     icon: <DatabaseOutlined />,
     order: 10,
     show: getAppRoute('entity-detail').path,
-    timePolicy: 'none'
+    timePolicy: 'none',
+    actionTimePolicies: { show: 'global' }
   }),
   routedNavigationResource('topology', {
     parent: 'shell-resources',
@@ -191,7 +192,9 @@ const staticRefineResources: ResourceProps[] = [
     parent: 'shell-alerting',
     icon: <WarningOutlined />,
     order: 10,
-    timePolicy: 'none'
+    show: getAppRoute('alert-investigation').path,
+    timePolicy: 'none',
+    actionTimePolicies: { show: 'route_owned' }
   }),
   routedNavigationResource('alert-rules', {
     parent: 'shell-alerting',

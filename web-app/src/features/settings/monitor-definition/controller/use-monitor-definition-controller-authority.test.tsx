@@ -307,6 +307,8 @@ describe('useMonitorDefinitionController authority', () => {
       );
 
       expect(api.detail).toHaveBeenCalledTimes(1);
+      expect(api.detail).toHaveBeenCalledWith('mysql', 'en-US', expect.any(AbortSignal));
+      expect(api.detail.mock.calls[0]?.[2]).toMatchObject({ aborted: false });
       expect(route.search).toBe('?scope=all&app=mysql');
     }
   );

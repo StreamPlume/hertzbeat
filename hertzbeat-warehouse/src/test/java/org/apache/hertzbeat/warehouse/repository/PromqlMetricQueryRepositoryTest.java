@@ -34,6 +34,7 @@ import org.apache.hertzbeat.common.entity.dto.query.DatasourceQueryData;
 import org.apache.hertzbeat.warehouse.db.QueryExecutor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -63,14 +64,16 @@ class PromqlMetricQueryRepositoryTest {
         MetricQueryRepository repository = new PromqlMetricQueryRepository(List.of(promqlQueryExecutor));
 
         MetricQueryRepository.PromqlRangeQueryResult result =
-                repository.queryPromqlRange("ref", "sum(rate(test_total[5m]))", 1000L, 2000L, "30s");
+                repository.queryPromqlRange("ref", "sum(rate(test_total[5m]))", 1000L, 2000L, "30s", 32);
 
         assertTrue(repository.hasPromqlExecutor());
         assertNotNull(result);
         assertEquals("Greptime-promql", result.datasource());
         assertEquals(queryData, result.results());
         assertEquals(null, result.errorMessage());
-        verify(promqlQueryExecutor).query(any(DatasourceQuery.class));
+        ArgumentCaptor<DatasourceQuery> queryCaptor = ArgumentCaptor.forClass(DatasourceQuery.class);
+        verify(promqlQueryExecutor).query(queryCaptor.capture());
+        assertEquals(32, queryCaptor.getValue().getLimit());
     }
 
     @Test

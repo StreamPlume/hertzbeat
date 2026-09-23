@@ -1,0 +1,271 @@
+/* Licensed to the Apache Software Foundation (ASF) under the Apache License, Version 2.0. */
+
+.primitive {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 388px;
+  grid-template-rows: 360px auto auto;
+}
+
+.runtime {
+  width: 100%;
+  min-width: 0;
+  height: 360px;
+  min-height: 360px;
+  overflow: hidden;
+  border-top: 1px solid var(--hb-border-subtle);
+}
+
+.runtime:has(> :global([data-perses-primitive='logs-table'])) {
+  overflow-x: hidden;
+  overflow-y: hidden;
+  border-top: 0;
+}
+
+.primitive[data-log-density] .runtime :global([data-log-index]) {
+  box-sizing: border-box;
+  margin-bottom: 0;
+  border-radius: 0;
+  font-family: var(--hb-font-family-mono);
+  box-shadow: none;
+  transition: background-color 140ms ease;
+}
+
+.primitive[data-log-density='compact'] .runtime :global([data-log-index] > div:first-child) {
+  min-height: 36px;
+  box-sizing: border-box;
+  align-items: center;
+  padding-block: 4px;
+}
+
+.primitive[data-log-density='comfortable'] .runtime :global([data-log-index] > div:first-child) {
+  min-height: 44px;
+  box-sizing: border-box;
+  align-items: center;
+  padding-block: 8px;
+}
+
+.primitive[data-log-show-time='true'] .runtime :global([data-log-index] > div:first-child) {
+  grid-template-columns: 184px minmax(0, 1fr) !important;
+}
+
+.primitive[data-log-show-time='false'] .runtime :global([data-log-index] > div:first-child) {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.primitive[data-log-show-time='false'] .runtime :global([data-log-index] time) {
+  display: none !important;
+}
+
+.primitive[data-log-density] .runtime :global([data-log-index] time) {
+  min-width: 0 !important;
+  max-width: 184px;
+  overflow: hidden;
+  font-family: var(--ant-font-family-code);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+}
+
+.primitive[data-log-density] .runtime :global([data-log-index] > div:first-child > div:last-of-type) {
+  min-width: 0 !important;
+  margin-left: 0 !important;
+}
+
+.primitive[data-log-density] .runtime :global([data-log-index] > div:first-child > div:last-of-type button) {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
+  padding: 4px;
+}
+
+.primitive[data-log-density]
+  .runtime
+  :global([data-log-index] > div:first-child > div:last-of-type button:focus-visible) {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.primitive[data-log-show-time='true'] .runtime :global([data-log-index] > div:first-child > div:last-of-type) {
+  grid-column: 2;
+}
+
+.primitive[data-log-show-time='false'] .runtime :global([data-log-index] > div:first-child > div:last-of-type) {
+  grid-column: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primitive[data-log-density] .runtime :global([data-log-index]) {
+    transition: none;
+  }
+}
+
+.state {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  color: var(--hb-text-secondary);
+}
+
+.primitive[data-variant='compact'] {
+  min-height: 84px;
+  grid-template-rows: 84px auto auto;
+}
+
+.primitive[data-variant='compact'] .runtime,
+.primitive[data-variant='compact'] .state {
+  height: 84px;
+  min-height: 84px;
+}
+
+.completeness {
+  display: flex;
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--hb-text-secondary);
+  font-size: 12px;
+}
+
+.interactions {
+  margin: 8px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.interactions > summary {
+  padding: 6px 8px;
+  color: var(--hb-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.interactionList {
+  display: grid;
+  gap: 6px;
+  max-height: 224px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.interactionList li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hb-border-subtle);
+}
+
+.interactionList li > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hb-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interactionList li > div {
+  display: flex;
+  flex: none;
+  flex-basis: 176px;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.interactions button {
+  padding: 3px 8px;
+  border: 1px solid var(--hb-border-subtle);
+  border-radius: 4px;
+  background: var(--hb-bg-raised);
+  color: var(--hb-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.interactions button:disabled {
+  color: var(--hb-text-muted);
+  cursor: not-allowed;
+}
+
+@media (width <= 700px) {
+  .interactionList li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .interactionList li > div {
+    width: 100%;
+    flex-basis: auto;
+  }
+}
+
+@media (width <= 420px) {
+  .primitive[data-log-density] .runtime :global([data-log-index] > div:first-child) {
+    min-height: 52px;
+    grid-template-rows: auto auto;
+    grid-template-columns: minmax(0, 1fr) max-content !important;
+    align-items: center;
+    gap: 2px 8px;
+    padding: 5px 8px;
+  }
+
+  .primitive[data-log-density]
+    .runtime
+    :global([data-log-index] > div:first-child[data-hertzbeat-log-severity])::after {
+    display: block;
+    max-width: 12ch;
+    overflow: hidden;
+    grid-row: 1;
+    grid-column: 2;
+    color: var(--hb-text-muted);
+    content: attr(data-hertzbeat-log-severity);
+    font-family: var(--hb-font-family-mono);
+    font-size: 11px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .primitive[data-log-density] .runtime :global([data-log-index] time) {
+    grid-row: 1;
+    grid-column: 1;
+    max-width: 100%;
+  }
+
+  .primitive[data-log-density] .runtime :global([data-log-index] > div:first-child > div:last-of-type) {
+    min-width: 0;
+    grid-row: 2;
+    grid-column: 1 / -1 !important;
+    gap: 6px;
+  }
+
+  .primitive[data-log-density] .runtime :global([data-log-index] > div:first-child > div:last-of-type p) {
+    min-width: 0;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: pre-wrap;
+  }
+
+  .primitive[data-log-density] .runtime :global([data-log-index] > div:first-child > div:last-of-type button) {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  .primitive[data-log-show-time='false']
+    .runtime
+    :global([data-log-index] > div:first-child[data-hertzbeat-log-severity])::after {
+    grid-column: 1 / -1;
+  }
+}

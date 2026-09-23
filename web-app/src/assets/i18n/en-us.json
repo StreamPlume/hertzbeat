@@ -342,6 +342,109 @@
       }
     },
     "explore": { "metrics": "Explore metrics", "logs": "Explore logs", "traces": "Explore traces" },
+    "signals": {
+      "title": "Entity signal investigation",
+      "availability": "Signal availability",
+      "invalidWindow": "Choose a valid window of 24 hours or less to inspect signals.",
+      "openExplore": "Open in Explore",
+      "items": "{{count}} items",
+      "traceDetail": "Trace detail",
+      "boundMonitors": "Bound monitors",
+      "boundMonitorsState": { "unknown": "Monitor binding evidence is unavailable.", "empty": "No bound monitors." },
+      "sections": {
+        "metrics": "Metrics",
+        "logs": "Logs",
+        "traces": "Traces",
+        "topology": "Topology",
+        "collection": "Collection",
+        "alerts": "Alerts"
+      },
+      "states": { "available": "Available", "empty": "Empty", "unavailable": "Unavailable", "unknown": "Unknown" },
+      "compact": {
+        "metrics": {
+          "empty": "No RED metrics in this window",
+          "unavailable": "RED metrics are unavailable",
+          "unknown": "RED metric availability is unknown"
+        },
+        "redMetrics": {
+          "empty": "No RED metrics in this window; other metric sources are unknown",
+          "unavailable": "RED metrics are unavailable; other metric sources are unknown"
+        },
+        "logs": {
+          "empty": "No logs in this window",
+          "unavailable": "Logs are unavailable",
+          "unknown": "Log availability is unknown"
+        },
+        "traces": {
+          "empty": "No traces in this window",
+          "unavailable": "Traces are unavailable",
+          "unknown": "Trace availability is unknown"
+        },
+        "topology": {
+          "empty": "No related entities",
+          "unavailable": "Topology is unavailable",
+          "unknown": "Topology availability is unknown"
+        },
+        "collection": {
+          "empty": "No collection executions in this window",
+          "unavailable": "Collection execution evidence is unavailable",
+          "unknown": "Collection execution evidence is not available in this view"
+        },
+        "alerts": {
+          "empty": "No alert evidence in this window",
+          "unavailable": "Alert evidence is unavailable",
+          "unknown": "Window-scoped alert evidence is unknown"
+        }
+      },
+      "red": {
+        "requestRate": "Request rate",
+        "errorRate": "Error rate",
+        "latencyP95": "P95 latency",
+        "requests": "Requests"
+      },
+      "aria": {
+        "requestRate": "Request rate visualization",
+        "errorRate": "Error rate visualization",
+        "latencyP95": "P95 latency visualization",
+        "logs": "Log evidence visualization",
+        "traces": "Trace evidence visualization",
+        "traceDetail": "Trace detail visualization"
+      },
+      "evidence": {
+        "title": "Evidence",
+        "empty": "No correlated evidence is available for this window.",
+        "greptimeFlow": "Greptime Flow · {{resolution}}s",
+        "reasons": {
+          "exact-span": "Exact span",
+          "exact-trace": "Exact trace",
+          "same-entity": "Same entity",
+          "bound-monitor": "Bound monitor",
+          "canonical-otel-identity": "Canonical OpenTelemetry identity",
+          "topology-related": "Topology relationship",
+          "time-proximity": "Time proximity"
+        },
+        "confidence": {
+          "exact": "Exact match",
+          "high": "High confidence",
+          "medium": "Medium confidence",
+          "low": "Low confidence"
+        }
+      },
+      "alertsCurrentOnly": "Current active-alert counts are not presented as evidence for the selected time window.",
+      "query": {
+        "loading": "Loading signal evidence…",
+        "empty": "No evidence in this window.",
+        "truncated": "Showing a bounded subset of matching evidence.",
+        "truncationUnknown": "Result completeness is unknown.",
+        "runtimeError": "The visualization runtime could not render this evidence.",
+        "investigationActions": "Investigation actions ({{count}})",
+        "invalid": "The signal request is invalid.",
+        "permission": "You do not have permission to inspect this signal.",
+        "overloaded": "Signal storage is busy. Try again.",
+        "unavailable": "Signal storage is unavailable.",
+        "contract": "Signal storage returned an invalid response."
+      }
+    },
     "topology": { "view": "View topology" },
     "discovery": {
       "action": "Discover resources",
@@ -504,6 +607,7 @@
     "datasource": "Data source",
     "queryMode": "Query mode",
     "trend": "Metric trend",
+    "chartUnavailable": "The metric chart is unavailable. Samples remain available below.",
     "filter": "Label filter, key=value",
     "groupBy": "Group by label",
     "aggregation": "Aggregation",
@@ -519,6 +623,7 @@
   },
   "exploreLog": {
     "mode": "Log mode",
+    "history": "History",
     "query": "Query",
     "live": "Live",
     "detail": "Log detail",
@@ -547,6 +652,7 @@
     "overview": "Log overview",
     "trend": "Log trend",
     "trendEmpty": "No trend buckets were returned for this query.",
+    "trendInsufficient": "The current window contains one bucket ({{count}} logs).",
     "statisticsUnavailable": "This statistics region could not be loaded.",
     "statistics": {
       "total": "Total",
@@ -1441,6 +1547,99 @@
       "collapseCard": "Collapse panel",
       "expandCard": "Expand panel",
       "resizeHistory": "Resize history panel"
+    }
+  },
+  "monitorSignals": {
+    "title": "Monitor signal evidence",
+    "availability": "Signal availability",
+    "window": "Investigation window: {{start}} – {{end}} · {{timeZone}}",
+    "windowUnavailable": "The investigation window is unavailable.",
+    "source": "Source",
+    "capabilities": {
+      "nativeMetrics": "Native Metrics",
+      "currentAlerts": "Current Alerts",
+      "collection": "Collection Health",
+      "boundEntity": "Bound Entity",
+      "otlpEvidence": "OTLP Evidence"
+    },
+    "states": {
+      "ready": "Available",
+      "empty": "Empty",
+      "unavailable": "Unavailable",
+      "unknown": "Unknown"
+    },
+    "sections": {
+      "currentAlerts": "Current Alerts",
+      "collectionHealth": "Collection Health",
+      "boundEntity": "Bound Entity",
+      "otelEvidence": "Related OTLP Evidence"
+    },
+    "alerts": {
+      "scope": "Current state · not history for the selected window",
+      "notRecorded": "Not recorded",
+      "activeCount_one": "{{count}} current active alert",
+      "activeCount_other": "{{count}} current active alerts",
+      "empty": "No alerts are currently active. This does not describe alert history for the selected window.",
+      "unavailable": "Current alert evidence is unavailable.",
+      "unknown": "Current alert evidence has not been resolved."
+    },
+    "collection": {
+      "last": "Last collection",
+      "duration": "Duration",
+      "outcome": "Outcome",
+      "collector": "Collector",
+      "notRecorded": "Not recorded",
+      "failurePhase": "Failure phase",
+      "failureClass": "Failure class",
+      "empty": "No collection execution was observed in this investigation window.",
+      "unavailable": "Collection execution evidence is unavailable.",
+      "unknown": "Collection execution evidence has not been resolved.",
+      "outcomes": { "success": "Succeeded", "failure": "Failed" },
+      "phases": {
+        "UNKNOWN": "Unknown phase",
+        "RESOLVE": "Resolve",
+        "CONNECT": "Connect",
+        "AUTHENTICATE": "Authenticate",
+        "QUERY": "Query",
+        "PARSE": "Parse",
+        "CONVERT": "Convert",
+        "DISPATCH": "Dispatch"
+      },
+      "failureClasses": {
+        "NONE": "No failure",
+        "UNAVAILABLE": "Unavailable",
+        "UNREACHABLE": "Unreachable",
+        "UNCONNECTABLE": "Connection failed",
+        "COLLECTION": "Collection failed",
+        "TIMEOUT": "Timed out",
+        "UNKNOWN": "Unknown failure"
+      }
+    },
+    "entity": {
+      "serviceName": "Service name",
+      "type": "Entity type",
+      "id": "Entity ID",
+      "namespace": "Service namespace",
+      "environment": "Environment",
+      "open": "Open Entity",
+      "empty": "This monitor is not bound to an Entity.",
+      "unavailable": "Entity binding evidence is unavailable.",
+      "unknown": "Entity binding evidence has not been resolved."
+    },
+    "otel": {
+      "scope": "Only signals observed for this exact binding are available. Explore preserves the investigation window and time zone.",
+      "open": "Open {{signal}} in Explore",
+      "empty": "No related OTLP signal was observed for this binding.",
+      "noEntity": "A bound Entity is required for a safe OTLP correlation.",
+      "unavailable": "Related OTLP evidence is unavailable.",
+      "unknown": "Related OTLP evidence has not been resolved."
+    },
+    "signals": { "metrics": "OTLP Metrics", "logs": "Logs", "traces": "Traces" },
+    "sources": {
+      "currentAlerts": "current alerts",
+      "collection": "Greptime collection events",
+      "entityBinding": "monitor-to-Entity binding",
+      "otelBinding": "observed binding signals"
     }
   },
   "settingsNavigation": {
@@ -3289,6 +3488,7 @@
     },
     "summaryUnavailable": "Alert summary is unavailable; alert results remain queryable.",
     "investigate": "Investigate",
+    "askAi": "Ask AI",
     "openMonitor": "Monitor",
     "openEntity": "Resource",
     "listUnavailable": "Alert results are unavailable.",
@@ -3839,6 +4039,76 @@
       "apiKey": "API key",
       "apiKeyHint": "Leave blank to keep the existing key.",
       "save": "Save provider"
+    }
+  },
+  "alertInvestigation": {
+    "title": "Alert investigation",
+    "unnamedAlert": "Unnamed alert",
+    "exactWindow": "Exact window",
+    "anchor": "Alert anchor",
+    "availability": "Evidence availability",
+    "notRecorded": "Not recorded",
+    "sections": {
+      "metrics": "Alert Metrics",
+      "logs": "Logs",
+      "traces": "Traces",
+      "topology": "Topology",
+      "collection": "Collection Health"
+    },
+    "states": {
+      "available": "Available",
+      "empty": "No evidence in this scope",
+      "unavailable": "Evidence unavailable"
+    },
+    "actions": {
+      "back": "Back to alerts",
+      "retry": "Retry",
+      "openMetrics": "Open Metrics",
+      "openLog": "Open Log",
+      "openTrace": "Open Trace",
+      "openTopology": "Open Topology"
+    },
+    "query": {
+      "loading": "Loading exact alert evidence…",
+      "invalidRoute": "The alert investigation URL is incomplete or invalid.",
+      "invalid": "The evidence query is invalid.",
+      "permission": "You do not have permission to inspect this evidence.",
+      "overloaded": "The evidence service is overloaded.",
+      "unavailable": "Alert investigation is unavailable.",
+      "contract": "Alert evidence did not match the expected contract.",
+      "runtimeError": "The evidence runtime could not render this result.",
+      "truncated": "Only the bounded result set is shown.",
+      "truncationUnknown": "The full result count is unknown."
+    },
+    "metrics": { "before": "Before", "anchor": "Alert", "after": "After" },
+    "logs": { "focusActions": "Logs available for focused investigation" },
+    "traces": {
+      "traceId": "Trace ID",
+      "service": "Service",
+      "start": "Start",
+      "duration": "Duration",
+      "status": "Status",
+      "spans": "Spans"
+    },
+    "traceStatus": { "error": "Error", "ok": "OK", "unset": "Unset", "unknown": "Unknown" },
+    "topology": {
+      "source": "Source",
+      "target": "Target",
+      "relation": "Relation",
+      "confidence": "Confidence",
+      "requests": "Requests",
+      "errors": "Errors"
+    },
+    "collection": {
+      "lastCollection": "Last collection",
+      "duration": "Duration",
+      "outcome": "Outcome",
+      "collector": "Collector",
+      "target": "Target",
+      "metricSet": "Metric set",
+      "failureClass": "Failure class",
+      "phase": "Phase",
+      "notRecorded": "Not recorded"
     }
   },
   "aiSchedules": {

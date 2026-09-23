@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.hertzbeat.common.entity.dto.Value;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket;
 
 /**
  * history data reader
@@ -553,68 +554,63 @@ public interface HistoryDataReader {
     }
 
     /**
-     * Aggregate log counts by hour in the storage engine when supported.
-     *
-     * @return a map keyed by yyyy-MM-dd HH:00
+     * Aggregate log counts by an epoch-aligned interval in the storage engine when supported.
      */
-    default Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName) {
-        throw new UnsupportedOperationException("count logs by hour is not supported");
+    default List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                     String traceId, String spanId, Integer severityNumber,
+                                                     String severityText, String searchContent,
+                                                     Set<String> excludedServiceNames,
+                                                     boolean requireServiceName) {
+        throw new UnsupportedOperationException("count logs by interval is not supported");
     }
 
     /**
-     * Aggregate log counts by hour with workspace scope in the storage engine when supported.
-     *
-     * @param workspaceId normalized workspace id that should own the aggregated logs
-     * @return a map keyed by yyyy-MM-dd HH:00
+     * Aggregate log counts by an epoch-aligned interval with workspace scope.
      */
-    default Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName,
-                                             String workspaceId) {
-        throw new UnsupportedOperationException("count workspace logs by hour is not supported");
+    default List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                     String traceId, String spanId, Integer severityNumber,
+                                                     String severityText, String searchContent,
+                                                     Set<String> excludedServiceNames,
+                                                     boolean requireServiceName,
+                                                     String workspaceId) {
+        throw new UnsupportedOperationException("count workspace logs by interval is not supported");
     }
 
     /**
-     * Aggregate log counts by hour with service/resource context.
+     * Aggregate log counts by an epoch-aligned interval with service/resource context.
      */
-    default Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName,
-                                             String workspaceId,
-                                             String serviceName,
-                                             String serviceNamespace,
-                                             String environment) {
-        throw new UnsupportedOperationException("count service-scoped logs by hour is not supported");
+    default List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                     String traceId, String spanId, Integer severityNumber,
+                                                     String severityText, String searchContent,
+                                                     Set<String> excludedServiceNames,
+                                                     boolean requireServiceName,
+                                                     String workspaceId,
+                                                     String serviceName,
+                                                     String serviceNamespace,
+                                                     String environment) {
+        throw new UnsupportedOperationException("count service-scoped logs by interval is not supported");
     }
 
     /**
-     * Aggregate log counts by hour with resource and log attribute predicates.
+     * Aggregate log counts by an epoch-aligned interval with resource and log attribute predicates.
      */
-    default Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName,
-                                             String workspaceId,
-                                             String serviceName,
-                                             String serviceNamespace,
-                                             String environment,
-                                             Map<String, String> resourceFilters,
-                                             Map<String, String> attributeFilters) {
+    default List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                     String traceId, String spanId, Integer severityNumber,
+                                                     String severityText, String searchContent,
+                                                     Set<String> excludedServiceNames,
+                                                     boolean requireServiceName,
+                                                     String workspaceId,
+                                                     String serviceName,
+                                                     String serviceNamespace,
+                                                     String environment,
+                                                     Map<String, String> resourceFilters,
+                                                     Map<String, String> attributeFilters) {
         if (!hasLogAttributeFilters(resourceFilters, attributeFilters)) {
-            return countLogsByHour(startTime, endTime, traceId, spanId, severityNumber,
+            return countLogsByInterval(startTime, endTime, intervalMs, traceId, spanId, severityNumber,
                     severityText, searchContent, excludedServiceNames, requireServiceName,
                     workspaceId, serviceName, serviceNamespace, environment);
         }
-        throw new UnsupportedOperationException("count attribute-scoped logs by hour is not supported");
+        throw new UnsupportedOperationException("count attribute-scoped logs by interval is not supported");
     }
 
     /**

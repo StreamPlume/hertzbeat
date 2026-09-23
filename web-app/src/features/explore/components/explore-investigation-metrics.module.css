@@ -1,0 +1,51 @@
+/* Licensed to the Apache Software Foundation (ASF) under the Apache License, Version 2.0. */
+
+.metricsBody {
+  display: grid;
+  min-width: 0;
+  gap: var(--hb-space-3);
+  padding: var(--hb-space-3);
+}
+
+.redSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--hb-space-2);
+  margin: 0;
+}
+
+.redRegion,
+.serviceMetrics,
+.metricGrid {
+  min-width: 0;
+}
+
+.redRegion,
+.serviceMetrics {
+  display: grid;
+  gap: var(--hb-space-2);
+}
+
+.redRegion h3,
+.serviceMetrics h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--hb-space-3);
+}
+
+@media (max-width: 900px) {
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .redSummary {
+    grid-template-columns: 1fr;
+  }
+}

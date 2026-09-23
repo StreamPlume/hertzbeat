@@ -38,7 +38,7 @@ type YamlDiffEditorProps = {
 export function YamlEditor({ ariaLabel, value, minHeight = '320px', readOnly = false, onChange }: YamlEditorProps) {
   const { theme } = useRuntimeTheme();
   const hostRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView>(null);
+  const viewRef = useRef<EditorView | null>(null);
   const initialValueRef = useRef(value);
   const onChangeRef = useLatestValue(onChange);
   const externalUpdateRef = useRef(false);
@@ -86,7 +86,7 @@ export function YamlDiffEditor({
 }: YamlDiffEditorProps) {
   const { theme } = useRuntimeTheme();
   const hostRef = useRef<HTMLDivElement>(null);
-  const mergeRef = useRef<MergeView>(null);
+  const mergeRef = useRef<MergeView | null>(null);
   const initialOriginalRef = useRef(originalValue);
   const initialModifiedRef = useRef(modifiedValue);
   const onChangeRef = useLatestValue(onChange);
@@ -161,7 +161,11 @@ function editorExtensions({
   ];
 }
 
-function updateEditorDocument(view: EditorView | null, value: string, externalUpdateRef: React.RefObject<boolean>) {
+function updateEditorDocument(
+  view: EditorView | null,
+  value: string,
+  externalUpdateRef: React.MutableRefObject<boolean>
+) {
   if (!view || view.state.doc.toString() === value) return;
   externalUpdateRef.current = true;
   try {

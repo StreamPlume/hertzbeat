@@ -38,6 +38,7 @@ import io.greptime.models.Err;
 import io.greptime.models.Result;
 import io.greptime.models.Table;
 import io.greptime.models.WriteOk;
+import io.greptime.v1.Common.SemanticType;
 import io.greptime.v1.RowData;
 import java.net.URI;
 import java.time.Duration;
@@ -54,7 +55,9 @@ import org.apache.hertzbeat.common.entity.arrow.RowWrapper;
 import org.apache.hertzbeat.common.entity.dto.Value;
 import org.apache.hertzbeat.common.entity.event.CollectionExecutionEvent;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket;
 import org.apache.hertzbeat.common.entity.message.CollectRep;
+import org.apache.hertzbeat.common.entity.metric.NativeMetricSystemContext;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.warehouse.constants.WarehouseConstants;
 import org.apache.hertzbeat.warehouse.db.GreptimeQueryGuard;
@@ -237,10 +240,10 @@ class GreptimeDbDataStorageTest {
             Table writtenTable = tableCaptor.getValue();
             List<RowData.Value> values = writtenTable.intoRowInsertRequest()
                     .getRows().getRows(0).getValuesList();
-            assertEquals("server-1", values.get(0).getStringValue());
-            assertEquals(1_712_733_600_123L, values.get(1).getTimestampMillisecondValue());
-            assertEquals(85.5, values.get(2).getF64Value());
-            assertEquals("server1", values.get(3).getStringValue());
+            assertEquals("1", values.get(3).getStringValue());
+            assertEquals("server-1", values.get(5).getStringValue());
+            assertEquals(1_712_733_600_123L, values.get(6).getTimestampMillisecondValue());
+            assertEquals(85.5, values.get(7).getF64Value());
             verify(metricsData, never()).getValues();
             verify(metricsData.readRow(), never()).cellStream();
 
@@ -257,6 +260,69 @@ class GreptimeDbDataStorageTest {
             // Verify write was not called again
             verify(greptimeDb, times(1)).write(any(Table.class));
             verify(emptyMetricsData, never()).getValues();
+        }
+    }
+
+    @Test
+    void writesFixedSystemTagsAndDropsEveryCollidingCollectorFieldAcrossRows() {
+        try (MockedStatic<GreptimeDB> mockedStatic = mockStatic(GreptimeDB.class)) {
+            mockedStatic.when(() -> GreptimeDB.create(any())).thenReturn(greptimeDb);
+            @SuppressWarnings("unchecked")
+            Result<WriteOk, Err> mockResult = mock(Result.class);
+            when(mockResult.isOk()).thenReturn(true);
+            when(greptimeDb.write(any(Table.class)))
+                    .thenReturn(CompletableFuture.completedFuture(mockResult));
+            NativeMetricSystemContext context = new NativeMetricSystemContext(
+                    "team-a", 99L, "database", 42L, null, "db.internal:3306");
+            greptimeDbDataStorage = new GreptimeDbDataStorage(
+                    greptimeProperties,
+                    restTemplate,
+                    greptimeSqlQueryExecutor,
+                    queryGuard,
+                    serverAvailabilityProbe,
+                    (metricsData, intrinsic) -> context);
+            CollectRep.MetricsData metricsData = collidingSystemDimensionMetrics();
+
+            greptimeDbDataStorage.saveData(metricsData);
+
+            ArgumentCaptor<Table> tableCaptor = ArgumentCaptor.forClass(Table.class);
+            verify(greptimeDb).write(tableCaptor.capture());
+            var rows = tableCaptor.getValue().intoRowInsertRequest().getRows();
+            assertEquals(List.of(
+                    "hertzbeat_workspace_id",
+                    "hertzbeat_entity_id",
+                    "hertzbeat_entity_type",
+                    "hertzbeat_monitor_id",
+                    "hertzbeat_collector_id",
+                    "instance",
+                    "ts",
+                    "usage",
+                    "device"), rows.getSchemaList().stream().map(RowData.ColumnSchema::getColumnName).toList());
+            assertEquals(List.of(
+                    SemanticType.TAG,
+                    SemanticType.TAG,
+                    SemanticType.TAG,
+                    SemanticType.TAG,
+                    SemanticType.TAG,
+                    SemanticType.TAG),
+                    rows.getSchemaList().subList(0, 6).stream()
+                            .map(RowData.ColumnSchema::getSemanticType)
+                            .toList());
+            assertEquals(2, rows.getRowsCount());
+            List<RowData.Value> first = rows.getRows(0).getValuesList();
+            assertEquals("team-a", first.get(0).getStringValue());
+            assertEquals("99", first.get(1).getStringValue());
+            assertEquals("database", first.get(2).getStringValue());
+            assertEquals("42", first.get(3).getStringValue());
+            assertEquals(RowData.Value.ValueDataCase.VALUEDATA_NOT_SET, first.get(4).getValueDataCase());
+            assertEquals("db.internal:3306", first.get(5).getStringValue());
+            assertEquals(1_712_733_600_123L, first.get(6).getTimestampMillisecondValue());
+            assertEquals(85.5, first.get(7).getF64Value());
+            assertEquals("sda", first.get(8).getStringValue());
+            List<RowData.Value> second = rows.getRows(1).getValuesList();
+            assertEquals("team-a", second.get(0).getStringValue());
+            assertEquals(73.25, second.get(7).getF64Value());
+            assertEquals("sdb", second.get(8).getStringValue());
         }
     }
 
@@ -334,6 +400,31 @@ class GreptimeDbDataStorageTest {
         assertFalse(result.isEmpty());
         // Verify that the mapping logic correctly extracted the value
         assertEquals("85.5", result.values().iterator().next().get(0).getOrigin());
+    }
+
+    @Test
+    void testGetHistoryMetricDataPreservesEntitySystemDimensions() {
+        greptimeDbDataStorage = new GreptimeDbDataStorage(
+                greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard);
+        PromQlQueryContent content = createMockPromQlQueryContent();
+        Map<String, String> metric = content.getData().getResult().getFirst().getMetric();
+        metric.put("hertzbeat_workspace_id", "team-a");
+        metric.put("hertzbeat_entity_id", "99");
+        metric.put("hertzbeat_entity_type", "database");
+        metric.put("hertzbeat_monitor_id", "42");
+        metric.put("hertzbeat_collector_id", "collector-arm-1");
+        when(restTemplate.exchange(any(), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(PromQlQueryContent.class))).thenReturn(new ResponseEntity<>(content, HttpStatus.OK));
+
+        Map<String, List<Value>> result = greptimeDbDataStorage.getHistoryMetricData(
+                "db.internal:3306", "linux", "cpu", "usage", "6h");
+
+        String seriesKey = result.keySet().iterator().next();
+        assertTrue(seriesKey.contains("\"hertzbeat_workspace_id\":\"team-a\""));
+        assertTrue(seriesKey.contains("\"hertzbeat_entity_id\":\"99\""));
+        assertTrue(seriesKey.contains("\"hertzbeat_entity_type\":\"database\""));
+        assertTrue(seriesKey.contains("\"hertzbeat_monitor_id\":\"42\""));
+        assertTrue(seriesKey.contains("\"hertzbeat_collector_id\":\"collector-arm-1\""));
     }
 
     @Test
@@ -828,23 +919,37 @@ class GreptimeDbDataStorageTest {
     }
 
     @Test
-    void testLogTrendUsesGreptimeHourAggregate() {
+    void testLogTrendUsesGreptimeAdaptiveIntervalAggregate() {
         try (MockedStatic<GreptimeDB> mockedStatic = mockStatic(GreptimeDB.class)) {
             mockedStatic.when(() -> GreptimeDB.create(any())).thenReturn(greptimeDb);
             greptimeDbDataStorage = new GreptimeDbDataStorage(greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard);
             when(greptimeSqlQueryExecutor.execute(anyString()))
-                    .thenReturn(List.of(Map.of("hour", 1777467600000000000L, "count", 12L)));
+                    .thenReturn(List.of(Map.of("bucket", 1777467600000000000L, "count", 12L)));
 
-            Map<String, Long> result = greptimeDbDataStorage.countLogsByHour(
-                    null, null, null, null, null, null, null,
+            List<LogTrendBucket> result = greptimeDbDataStorage.countLogsByInterval(
+                    null, null, 60_000L, null, null, null, null, null,
                     Collections.emptySet(), false);
 
-            assertEquals(12L, result.values().iterator().next());
+            assertEquals(List.of(new LogTrendBucket(1_777_467_600_000L, 12L)), result);
             ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
             verify(greptimeSqlQueryExecutor).execute(sqlCaptor.capture());
-            assertTrue(sqlCaptor.getValue().contains("date_bin('1 hour', timestamp) as hour"));
-            assertTrue(sqlCaptor.getValue().contains("GROUP BY hour"));
+            assertTrue(sqlCaptor.getValue().contains("date_bin('1 minute', timestamp) as bucket"));
+            assertTrue(sqlCaptor.getValue().contains("GROUP BY bucket"));
             assertFalse(sqlCaptor.getValue().contains("SELECT timestamp, trace_id"));
+        }
+    }
+
+    @Test
+    void testLogTrendRejectsOverflowingUnsupportedInterval() {
+        try (MockedStatic<GreptimeDB> mockedStatic = mockStatic(GreptimeDB.class)) {
+            mockedStatic.when(() -> GreptimeDB.create(any())).thenReturn(greptimeDb);
+            greptimeDbDataStorage = new GreptimeDbDataStorage(
+                    greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard);
+
+            assertThrows(IllegalArgumentException.class, () -> greptimeDbDataStorage.countLogsByInterval(
+                    null, null, 4_294_967_296L + 60_000L, null, null, null, null, null,
+                    Collections.emptySet(), false));
+            verify(greptimeSqlQueryExecutor, never()).execute(anyString());
         }
     }
 
@@ -854,17 +959,17 @@ class GreptimeDbDataStorageTest {
             mockedStatic.when(() -> GreptimeDB.create(any())).thenReturn(greptimeDb);
             greptimeDbDataStorage = new GreptimeDbDataStorage(greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard);
             when(greptimeSqlQueryExecutor.executeStrict(anyString()))
-                    .thenReturn(List.of(Map.of("hour", 1777467600000000000L, "count", 12L)));
+                    .thenReturn(List.of(Map.of("bucket", 1777467600000000000L, "count", 12L)));
 
-            Map<String, Long> result = greptimeDbDataStorage.countLogsByHour(
-                    1710000000000L, 1710000060000L, null, null, null, null, "checkout",
+            List<LogTrendBucket> result = greptimeDbDataStorage.countLogsByInterval(
+                    1710000000000L, 1710000060000L, 60_000L, null, null, null, null, "checkout",
                     Set.of("otelcol-contrib"), true, "team-a");
 
-            assertEquals(12L, result.values().iterator().next());
+            assertEquals(12L, result.getFirst().count());
             ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
             verify(greptimeSqlQueryExecutor).executeStrict(sqlCaptor.capture());
             String sql = sqlCaptor.getValue();
-            assertTrue(sql.contains("date_bin('1 hour', timestamp) as hour"));
+            assertTrue(sql.contains("date_bin('1 minute', timestamp) as bucket"));
             assertTrue(sql.contains("timestamp >= to_timestamp_millis(1710000000000)"));
             assertTrue(sql.contains("timestamp <= to_timestamp_millis(1710000060000)"));
             assertTrue(sql.contains("matches_term(body, 'checkout')"));
@@ -873,7 +978,7 @@ class GreptimeDbDataStorageTest {
                     "TRIM(json_get_string(resource_attributes, '$[\"hertzbeat.workspace_id\"]')) = 'team-a'"));
             assertTrue(sql.contains(
                     "TRIM(json_get_string(resource_attributes, '$[\"workspace.id\"]')) = 'team-a'"));
-            assertTrue(sql.contains("GROUP BY hour ORDER BY hour ASC"));
+            assertTrue(sql.contains("GROUP BY bucket ORDER BY bucket ASC"));
             assertFalse(sql.contains("SELECT timestamp, trace_id"));
         }
     }
@@ -1071,6 +1176,66 @@ class GreptimeDbDataStorageTest {
         lenient().when(mockMetricsData.readRow()).thenReturn(mockRowWrapper);
 
         return mockMetricsData;
+    }
+
+    private CollectRep.MetricsData collidingSystemDimensionMetrics() {
+        List<CollectRep.Field> fields = new ArrayList<>();
+        for (String name : List.of(
+                "hertzbeat_workspace_id",
+                "hertzbeat_entity_id",
+                "hertzbeat_entity_type",
+                "hertzbeat_monitor_id",
+                "hertzbeat_collector_id",
+                "instance",
+                "ts")) {
+            fields.add(CollectRep.Field.newBuilder()
+                    .setName(name)
+                    .setType(CommonConstants.TYPE_STRING)
+                    .setLabel(true)
+                    .build());
+        }
+        fields.add(CollectRep.Field.newBuilder()
+                .setName("usage")
+                .setType(CommonConstants.TYPE_NUMBER)
+                .setLabel(false)
+                .build());
+        fields.add(CollectRep.Field.newBuilder()
+                .setName("device")
+                .setType(CommonConstants.TYPE_STRING)
+                .setLabel(true)
+                .build());
+        CollectRep.MetricsData.Builder builder = CollectRep.MetricsData.newBuilder()
+                .setId(42L)
+                .setApp("linux")
+                .setMetrics("cpu")
+                .setTime(1_712_733_600_123L)
+                .setCode(CollectRep.Code.SUCCESS);
+        builder.addAllFields(fields);
+        builder.addValueRow(CollectRep.ValueRow.newBuilder()
+                .setColumns(List.of(
+                        "spoof-workspace",
+                        "spoof-entity",
+                        "spoof-type",
+                        "spoof-monitor",
+                        "spoof-collector",
+                        "spoof-instance",
+                        "spoof-ts",
+                        "85.5",
+                        "sda"))
+                .build());
+        builder.addValueRow(CollectRep.ValueRow.newBuilder()
+                .setColumns(List.of(
+                        "spoof-workspace-2",
+                        "spoof-entity-2",
+                        "spoof-type-2",
+                        "spoof-monitor-2",
+                        "spoof-collector-2",
+                        "spoof-instance-2",
+                        "spoof-ts-2",
+                        "73.25",
+                        "sdb"))
+                .build());
+        return builder.build();
     }
 
     private PromQlQueryContent createMockPromQlQueryContent() {

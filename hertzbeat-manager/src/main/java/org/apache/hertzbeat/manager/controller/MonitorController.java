@@ -24,7 +24,7 @@ import jakarta.validation.Valid;
 import org.apache.hertzbeat.common.entity.dto.Message;
 import org.apache.hertzbeat.common.entity.manager.Monitor;
 import org.apache.hertzbeat.manager.pojo.dto.MonitorDto;
-import org.apache.hertzbeat.manager.pojo.dto.MonitorInvestigationBindingInfo;
+import org.apache.hertzbeat.manager.pojo.dto.MonitorSignalView;
 import org.apache.hertzbeat.manager.service.MonitorService;
 import org.apache.hertzbeat.manager.service.entity.MonitorInvestigationReadModelService;
 import org.apache.hertzbeat.manager.support.exception.MonitorCopySourceNotFoundException;
@@ -42,6 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import static org.apache.hertzbeat.common.constants.CommonConstants.FAIL_CODE;
 import static org.apache.hertzbeat.common.constants.CommonConstants.MONITOR_NOT_EXIST_CODE;
+import static org.apache.hertzbeat.common.constants.CommonConstants.PARAM_INVALID_CODE;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 /**
@@ -128,12 +129,21 @@ public class MonitorController {
     }
 
     @GetMapping(path = "/{id}/investigation")
-    @Operation(summary = "Get the exact Entity investigation binding for a Monitor",
-            description = "Get the workspace-visible Entity and observed signals bound to one Monitor")
-    public ResponseEntity<Message<MonitorInvestigationBindingInfo>> getMonitorInvestigation(
+    @Operation(summary = "Get the bounded signal investigation view for a Monitor",
+            description = "Get collection, current alert, and exact workspace-visible Entity binding evidence")
+    public ResponseEntity<Message<MonitorSignalView>> getMonitorInvestigation(
             @Parameter(description = "Monitoring task ID", example = "6565463543")
-            @PathVariable("id") final long id) {
-        return ResponseEntity.ok(Message.success(monitorInvestigationReadModelService.resolve(id).orElse(null)));
+            @PathVariable("id") final long id,
+            @Parameter(required = true) @RequestParam(value = "start", required = false) final Long start,
+            @Parameter(required = true) @RequestParam(value = "end", required = false) final Long end) {
+        if (start == null || end == null) {
+            return ResponseEntity.ok(Message.fail(PARAM_INVALID_CODE, "monitor_signal_window_invalid"));
+        }
+        Monitor monitor = monitorService.getMonitor(id);
+        if (monitor == null) {
+            return ResponseEntity.ok(Message.fail(MONITOR_NOT_EXIST_CODE, "Monitor not exist."));
+        }
+        return ResponseEntity.ok(Message.success(monitorInvestigationReadModelService.query(monitor, start, end)));
     }
 
     @DeleteMapping(path = "/{id}")

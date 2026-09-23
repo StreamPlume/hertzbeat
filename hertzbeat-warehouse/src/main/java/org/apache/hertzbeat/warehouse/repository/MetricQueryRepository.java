@@ -46,7 +46,24 @@ public interface MetricQueryRepository {
      * @param step range step
      * @return datasource and query result
      */
-    PromqlRangeQueryResult queryPromqlRange(String refId, String query, long start, long end, String step);
+    default PromqlRangeQueryResult queryPromqlRange(
+            String refId, String query, long start, long end, String step) {
+        return queryPromqlRange(refId, query, start, end, step, null);
+    }
+
+    /**
+     * Execute a promql range query with a datasource-enforced series limit.
+     *
+     * @param refId query ref id
+     * @param query promql expression
+     * @param start range start millis
+     * @param end range end millis
+     * @param step range step
+     * @param maxSeries maximum datasource series count, or {@code null} for the repository default
+     * @return datasource and query result
+     */
+    PromqlRangeQueryResult queryPromqlRange(
+            String refId, String query, long start, long end, String step, Integer maxSeries);
 
     /**
      * Promql query result wrapper.

@@ -48,58 +48,143 @@
 }
 
 .statistics {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
-  gap: 12px;
-  margin-bottom: 12px;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  margin-bottom: 0;
 }
 
 .statistics > section {
-  padding: 12px;
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: var(--ant-border-radius);
+  min-width: 0;
+}
+
+.statistics > .overview {
+  display: flex;
+  min-height: var(--hb-workbench-header-height);
+  align-items: center;
+  border-bottom: 1px solid var(--hb-border-subtle);
 }
 
 .statistics h3 {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 14px;
+  font-weight: 650;
+}
+
+.trendHeader {
+  display: flex;
+  min-height: var(--hb-workbench-header-height);
+  align-items: center;
+  gap: var(--hb-space-3);
 }
 
 .overviewStats {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--hb-space-4);
   margin: 0;
 }
 
 .overviewStats div {
-  min-width: 0;
+  display: inline-flex;
+  min-width: max-content;
+  align-items: baseline;
+  gap: var(--hb-space-1);
+}
+
+.overviewStats button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: baseline;
+  gap: var(--hb-space-1);
+  padding: 0 var(--hb-space-1);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.overviewStats button:hover:not(:disabled) {
+  background: var(--hb-bg-hover);
+}
+
+.overviewStats button[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--ant-color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--ant-color-primary) 9%, transparent);
+  color: var(--ant-color-primary);
+}
+
+.overviewStats button:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 1px;
+}
+
+.overviewStats button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.overviewStats button span {
+  color: currentcolor;
+  font-size: 12px;
+}
+
+.overviewStats button strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .overviewStats dt,
 .trendRows time {
-  color: var(--ant-color-text-secondary);
+  color: var(--hb-text-muted);
   font-size: 12px;
 }
 
 .overviewStats dd {
-  margin: 2px 0 0;
+  margin: 0;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend[data-trend-density='compact'] {
+  min-height: var(--hb-workbench-header-height);
+}
+
+.trend[data-trend-density='visualization'] .trendHeader {
+  border-bottom: 1px solid var(--hb-border-subtle);
+}
+
+.trend[data-trend-density='visualization'] {
+  height: 120px;
+  overflow: hidden;
+}
+
+.evidenceState {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hb-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trendChart {
   width: 100%;
-  height: 220px;
   min-width: 0;
 }
 
 @media (width <= 900px) {
-  .statistics {
-    grid-template-columns: 1fr;
+  .statistics > .overview {
+    min-height: auto;
+    padding-block: var(--hb-space-2);
   }
 
   .overviewStats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--hb-space-2) var(--hb-space-4);
   }
 }
 

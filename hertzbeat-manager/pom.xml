@@ -50,6 +50,10 @@
             <groupId>org.apache.hertzbeat</groupId>
             <artifactId>hertzbeat-warehouse</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
         <!-- alerter -->
         <dependency>
             <groupId>org.apache.hertzbeat</groupId>

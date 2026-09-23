@@ -113,12 +113,17 @@ class GreptimePromqlQueryExecutorTest {
                 .start(1_775_034_288_092L)
                 .end(1_775_037_888_092L)
                 .step("30s")
+                .limit(32)
                 .build();
 
         DatasourceQueryData result = greptimePromqlQueryExecutor.query(query);
 
         assertEquals(200, result.getStatus());
         assertEquals(1, result.getFrames().size());
+        ArgumentCaptor<URI> uriCaptor = ArgumentCaptor.forClass(URI.class);
+        verify(restTemplate).exchange(
+                uriCaptor.capture(), eq(HttpMethod.GET), any(HttpEntity.class), eq(PromQlQueryContent.class));
+        assertTrue(uriCaptor.getValue().getQuery().contains("limit=32"));
     }
 
     @Test

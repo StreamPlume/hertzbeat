@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildTopologyFocusPath } from '@/features/topology';
+import { buildTopologyFocusPath, buildTopologyInvestigationPath } from '@/features/topology';
 import type { TopologyNode } from './topology-contract';
 import { buildTopologyEntityPath, buildTopologySignalPath, safeTopologyReturnTo } from './topology-navigation-model';
 
@@ -37,6 +37,16 @@ describe('topology inspector navigation', () => {
     expect(buildTopologyFocusPath({ entityId: 42 })).toBe(
       '/topology?focusEntityId=42&depth=2&sourceKind=entity-relation'
     );
+  });
+
+  it('builds an OTLP investigation focus with the exact evidence window', () => {
+    expect(
+      buildTopologyInvestigationPath({
+        entityId: 7,
+        environment: 'prod',
+        window: { from: 1_000, to: 2_000 }
+      })
+    ).toBe('/topology?focusEntityId=7&depth=1&environment=prod&sourceKind=otel&start=1000&end=2000');
   });
 
   it('reuses a complete safe topology return context and falls back when it is invalid', () => {

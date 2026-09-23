@@ -27,7 +27,12 @@ const dist = join(root, 'dist');
 const manifestPath = join(dist, '.vite', 'manifest.json');
 const chunkRawLimit = bundleLimits.chunkWarningKilobytes * 1024;
 const shellGzipLimit = bundleLimits.shellGzipBytes;
-const totalRawLimit = bundleLimits.totalJavaScriptBytes;
+const totalRawLimit =
+  bundleLimits.baseApplicationJavaScriptBytes +
+  bundleLimits.persesRuntimeJavaScriptAllowanceBytes +
+  bundleLimits.persesMultiSignalJavaScriptAllowanceBytes +
+  bundleLimits.observabilityWorkbenchJavaScriptAllowanceBytes +
+  bundleLimits.alertInvestigationJavaScriptAllowanceBytes;
 
 if (!existsSync(manifestPath)) {
   console.error('Bundle budget failed: dist manifest is missing. Run pnpm build first.');
@@ -58,7 +63,22 @@ if (entryGzip > shellGzipLimit) {
   failures.push(`shell ${entryGzip} bytes gzip exceeds ${shellGzipLimit}`);
 }
 if (totalRaw > totalRawLimit) {
-  failures.push(`total JavaScript ${totalRaw} bytes exceeds ${totalRawLimit}`);
+  failures.push(
+    `total JavaScript ${totalRaw} bytes exceeds ${totalRawLimit} ` +
+      `(${bundleLimits.baseApplicationJavaScriptBytes} base + ` +
+      `${bundleLimits.persesRuntimeJavaScriptAllowanceBytes} Perses time-series allowance + ` +
+      `${bundleLimits.persesMultiSignalJavaScriptAllowanceBytes} Perses multi-signal allowance + ` +
+      `${bundleLimits.observabilityWorkbenchJavaScriptAllowanceBytes} Observability Workbench allowance + ` +
+      `${bundleLimits.alertInvestigationJavaScriptAllowanceBytes} Alert Investigation allowance)`
+  );
+}
+const shellStaticClosure = staticImportClosure(manifest, 'index.html');
+for (const runtimeSource of bundleLimits.persesDynamicRuntimeSources) {
+  if (!manifest[runtimeSource]?.isDynamicEntry) {
+    failures.push(`${runtimeSource} must remain a dynamic production entry`);
+  } else if (shellStaticClosure.has(runtimeSource)) {
+    failures.push(`${runtimeSource} must not enter the shell's static import closure`);
+  }
 }
 
 if (failures.length > 0) {
@@ -69,5 +89,20 @@ if (failures.length > 0) {
 
 console.log(
   `Bundle budget passed: ${basename(entry.file)} is ${entryRaw} bytes raw / ${entryGzip} bytes gzip; ` +
-    `total JavaScript is ${totalRaw} bytes.`
+    `total JavaScript is ${totalRaw} bytes including bounded ` +
+    `${bundleLimits.persesRuntimeJavaScriptAllowanceBytes}-byte time-series and ` +
+    `${bundleLimits.persesMultiSignalJavaScriptAllowanceBytes}-byte multi-signal Perses allowances, plus a bounded ` +
+    `${bundleLimits.observabilityWorkbenchJavaScriptAllowanceBytes}-byte Observability Workbench allowance and ` +
+    `${bundleLimits.alertInvestigationJavaScriptAllowanceBytes}-byte Alert Investigation allowance.`
 );
+
+function staticImportClosure(buildManifest, root) {
+  const visited = new Set();
+  const visit = key => {
+    if (visited.has(key) || !buildManifest[key]) return;
+    visited.add(key);
+    buildManifest[key].imports?.forEach(visit);
+  };
+  visit(root);
+  return visited;
+}

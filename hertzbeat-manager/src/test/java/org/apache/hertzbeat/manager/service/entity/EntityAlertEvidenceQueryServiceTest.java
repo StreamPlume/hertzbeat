@@ -40,7 +40,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -183,6 +185,26 @@ class EntityAlertEvidenceQueryServiceTest {
 
         assertEquals(List.of(teamAlphaAlert), alerts);
         verify(entityWorkspaceAccessService).currentRequestWorkspaceId();
+    }
+
+    @Test
+    void findActiveAlertPagePreservesExactCountBeyondBoundedPreview() {
+        Monitor monitor = monitor("checkout-api", "checkout.default.svc.cluster.local");
+        List<SingleAlert> previews = List.of(
+                alert(1L, CommonConstants.ALERT_STATUS_FIRING, "critical", null, Map.of()),
+                alert(2L, CommonConstants.ALERT_STATUS_FIRING, "critical", null, Map.of()));
+        when(singleAlertDao.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(previews, PageRequest.of(0, 5), 9));
+
+        Page<SingleAlert> page = entityAlertEvidenceQueryService.findActiveAlertPage(
+                List.of(monitor), 0, 5, "team-a");
+
+        assertEquals(9L, page.getTotalElements());
+        assertEquals(previews, page.getContent());
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(singleAlertDao).findAll(any(Specification.class), pageable.capture());
+        assertEquals(0, pageable.getValue().getPageNumber());
+        assertEquals(5, pageable.getValue().getPageSize());
     }
 
     @Test

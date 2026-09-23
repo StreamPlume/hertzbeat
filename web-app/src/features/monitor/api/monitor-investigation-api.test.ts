@@ -8,55 +8,75 @@ vi.mock('@/core/http/api-message', async importOriginal => ({
   ...http
 }));
 
-import { loadMonitorInvestigationBinding } from './monitor-api';
+import { loadMonitorInvestigation } from './monitor-api';
 import { MonitorContractError } from '../model/monitor-contract';
+
+const window = { from: 1_750_000_000_000, to: 1_750_003_600_000 };
 
 describe('monitor investigation API', () => {
   beforeEach(() => http.apiMessageGet.mockReset());
 
-  it('loads one exact persisted Monitor-to-Entity binding and forwards cancellation', async () => {
+  it('loads the exact bounded Monitor Signal View contract and forwards cancellation', async () => {
     const signal = new AbortController().signal;
-    http.apiMessageGet.mockResolvedValue({
-      monitorId: 42,
-      entityId: 7,
-      entityType: 'service',
-      serviceName: 'checkout',
-      serviceNamespace: 'commerce',
-      environment: 'production',
-      signals: ['metrics', 'logs', 'traces']
-    });
+    http.apiMessageGet.mockResolvedValue(readyInvestigation());
 
-    await expect(loadMonitorInvestigationBinding(42, signal)).resolves.toEqual({
-      monitorId: 42,
-      entityId: 7,
-      entityType: 'service',
-      serviceName: 'checkout',
-      serviceNamespace: 'commerce',
-      environment: 'production',
-      signals: ['metrics', 'logs', 'traces']
-    });
-    expect(http.apiMessageGet).toHaveBeenCalledWith('/api/monitor/42/investigation', { signal });
-  });
-
-  it('keeps a missing authoritative binding absent instead of fabricating a route', async () => {
-    http.apiMessageGet.mockResolvedValue(null);
-
-    await expect(loadMonitorInvestigationBinding(42)).resolves.toBeUndefined();
+    await expect(loadMonitorInvestigation(42, window, signal)).resolves.toEqual(readyInvestigation());
+    expect(http.apiMessageGet).toHaveBeenCalledWith(
+      '/api/monitor/42/investigation?start=1750000000000&end=1750003600000',
+      { signal }
+    );
   });
 
   it.each([
-    { monitorId: 41, entityId: 7, entityType: 'service', serviceName: 'checkout', signals: ['metrics'] },
-    { monitorId: 42, entityId: 7, entityType: 'host', serviceName: 'checkout', signals: ['metrics'] },
-    { monitorId: 42, entityId: 7, entityType: 'service', serviceName: 'checkout', signals: ['metrics', 'profiles'] },
-    { monitorId: 42, entityId: 7, entityType: 'service', serviceName: 'checkout', signals: ['metrics', 'metrics'] }
-  ])('rejects malformed or mismatched binding evidence %#', async value => {
-    http.apiMessageGet.mockResolvedValue(value);
-
-    await expect(loadMonitorInvestigationBinding(42)).rejects.toBeInstanceOf(MonitorContractError);
-  });
-
-  it.each([0, -1, Number.MAX_SAFE_INTEGER + 1])('rejects invalid Monitor identity %s before I/O', async monitorId => {
-    await expect(loadMonitorInvestigationBinding(monitorId)).rejects.toBeInstanceOf(MonitorContractError);
+    [0, window],
+    [42, { from: window.to, to: window.from }],
+    [42, { from: window.from, to: window.from + 86_400_001 }]
+  ])('rejects invalid Monitor or window evidence before I/O %#', async (monitorId, candidateWindow) => {
+    await expect(loadMonitorInvestigation(monitorId, candidateWindow)).rejects.toBeInstanceOf(MonitorContractError);
     expect(http.apiMessageGet).not.toHaveBeenCalled();
   });
 });
+
+function readyInvestigation() {
+  return {
+    monitorId: 42,
+    window: { start: window.from, end: window.to },
+    collection: {
+      state: 'ready' as const,
+      source: 'greptime_collection_events' as const,
+      event: {
+        observedAt: window.to - 1_000,
+        durationMillis: 125,
+        outcome: 'FAILURE' as const,
+        collectorId: 'collector-a',
+        target: '10.0.0.8:3306',
+        metricSet: 'summary',
+        failureClass: 'UNREACHABLE' as const,
+        phase: 'CONNECT' as const,
+        fieldCount: 0,
+        rowCount: 0
+      }
+    },
+    alerts: {
+      state: 'ready' as const,
+      source: 'current_alerts' as const,
+      scope: 'current' as const,
+      activeCount: 1,
+      previews: [
+        { id: 9, status: 'firing', severity: 'critical', summary: 'Target unreachable', activeAt: 1_749_999_000_000 }
+      ]
+    },
+    binding: {
+      state: 'ready' as const,
+      identity: {
+        monitorId: 42,
+        entityId: 7,
+        entityType: 'service' as const,
+        serviceName: 'checkout',
+        serviceNamespace: 'commerce',
+        environment: 'production',
+        signals: ['metrics', 'logs', 'traces'] as const
+      }
+    }
+  };
+}

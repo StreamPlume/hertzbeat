@@ -22,6 +22,7 @@ import { i18n, initializeI18n, loadLocale } from '@/core/i18n/i18n';
 import { QUERY_CONTEXT_FIELDS } from '@/shared/query-context';
 
 import { ExploreActiveFilters } from './explore-active-filters';
+import type { ExploreQuery } from '../model/explore-model';
 
 describe('Explore active filters', () => {
   beforeAll(async () => {
@@ -133,6 +134,82 @@ describe('Explore active filters', () => {
     closeFilter('Hide noise logs');
     expect(removeFilter).toHaveBeenCalledWith('hideNoise');
     expect(updateQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'metric label filter',
+      { signal: 'metrics', timeRange: 'last-30m', metricFilter: 'method=GET' },
+      'Label filter, key=value: method=GET',
+      'metricFilter'
+    ],
+    [
+      'metric group by',
+      { signal: 'metrics', timeRange: 'last-30m', groupBy: 'service.name' },
+      'Group by label: service.name',
+      'groupBy'
+    ],
+    [
+      'metric aggregation',
+      { signal: 'metrics', timeRange: 'last-30m', aggregation: 'sum' },
+      'Aggregation: sum',
+      'aggregation'
+    ],
+    [
+      'metric step',
+      { signal: 'metrics', timeRange: 'last-30m', step: '60' },
+      'Step in seconds, for example 60: 60',
+      'step'
+    ],
+    [
+      'log resource filter',
+      { signal: 'logs', timeRange: 'last-30m', resourceFilter: 'service.name=checkout' },
+      'Resource attributes, key=value: service.name=checkout',
+      'resourceFilter'
+    ],
+    [
+      'log attribute filter',
+      { signal: 'logs', timeRange: 'last-30m', attributeFilter: 'http.status_code:500' },
+      'Log attributes, key:value: http.status_code:500',
+      'attributeFilter'
+    ],
+    [
+      'trace resource filter',
+      { signal: 'traces', timeRange: 'last-30m', resourceFilter: 'service.name=checkout' },
+      'Resource attributes, key=value: service.name=checkout',
+      'resourceFilter'
+    ],
+    [
+      'trace attribute filter',
+      { signal: 'traces', timeRange: 'last-30m', attributeFilter: 'http.route:/checkout' },
+      'Trace attributes, key:value: http.route:/checkout',
+      'attributeFilter'
+    ],
+    [
+      'trace minimum duration',
+      { signal: 'traces', timeRange: 'last-30m', minDurationMs: 25 },
+      'Minimum duration (ms): 25',
+      'minDurationMs'
+    ],
+    [
+      'trace maximum duration',
+      { signal: 'traces', timeRange: 'last-30m', maxDurationMs: 800 },
+      'Maximum duration (ms): 800',
+      'maxDurationMs'
+    ]
+  ] as const)('shows and removes the applied %s chip', (_name, query, label, key) => {
+    const removeFilter = vi.fn(() => true);
+    render(
+      <ExploreActiveFilters
+        query={query as ExploreQuery}
+        t={i18n.t}
+        updateQuery={vi.fn()}
+        removeFilter={removeFilter}
+      />
+    );
+
+    closeFilter(label);
+    expect(removeFilter).toHaveBeenCalledWith(key);
   });
 });
 

@@ -44,8 +44,9 @@ export function parseExploreQuery(params: URLSearchParams): ExploreQuery {
     autoRefreshMs: readAutoRefresh(params.get('autoRefresh')),
     start: time.start,
     end: time.end,
-    timeZone: normalizeInvestigationTimeZone(params.get('timeZone')),
+    timeZone: readValue(params.get('timeZone')),
     live: readLiveMode(params),
+    logRecordUid: readOpaqueRouteValue(params, 'logRecordUid'),
     severityText: readValue(params.get('severityText')),
     spanId: readValue(params.get('spanId')),
     resourceFilter: readValue(params.get('resourceFilter')),
@@ -113,6 +114,7 @@ export function normalizeExploreQuery(
     return {
       ...traceContext,
       signal: 'logs',
+      logRecordUid: query.logRecordUid,
       live: query.live,
       severityText: query.severityText,
       spanId: query.spanId,
@@ -132,15 +134,37 @@ export function normalizeExploreQuery(
 }
 
 function normalizeExploreTimeEvidence(query: ExploreQueryPatch) {
-  const exactWindow = query.start != null && query.end != null && query.start < query.end;
-  // A preset with residual timestamps is invalid handoff evidence. Preserve it so URL repair cannot widen scope.
-  const invalidPresetEvidence = query.windowMode === 'preset' && (query.start != null || query.end != null);
+  const exactWindow = hasNormalizedExactWindow(query);
+  const focusedEvidence = query.traceId != null || query.logRecordUid != null;
+  const retainWindow = shouldRetainTimeEvidence(query, exactWindow, focusedEvidence);
   return {
     autoRefreshMs: exactWindow ? undefined : query.autoRefreshMs,
-    start: exactWindow || invalidPresetEvidence ? query.start : undefined,
-    end: exactWindow || invalidPresetEvidence ? query.end : undefined,
-    timeZone: exactWindow ? normalizeInvestigationTimeZone(query.timeZone) : undefined
+    start: retainWindow ? query.start : undefined,
+    end: retainWindow ? query.end : undefined,
+    timeZone: normalizedRouteTimeZone(query, exactWindow, focusedEvidence)
   };
+}
+
+function hasNormalizedExactWindow(query: ExploreQueryPatch) {
+  return (
+    Number.isSafeInteger(query.start) &&
+    Number.isSafeInteger(query.end) &&
+    query.start! > 0 &&
+    query.start! < query.end!
+  );
+}
+
+function shouldRetainTimeEvidence(query: ExploreQueryPatch, exactWindow: boolean, focusedEvidence: boolean) {
+  const hasPartialTime = query.start != null || query.end != null || query.timeZone != null;
+  const invalidFocusedEvidence = focusedEvidence && hasPartialTime && !exactWindow;
+  // A preset with residual timestamps is invalid handoff evidence. Preserve it so URL repair cannot widen scope.
+  const invalidPresetEvidence = query.windowMode === 'preset' && (query.start != null || query.end != null);
+  return exactWindow || invalidPresetEvidence || invalidFocusedEvidence;
+}
+
+function normalizedRouteTimeZone(query: ExploreQueryPatch, exactWindow: boolean, focusedEvidence: boolean) {
+  if (focusedEvidence && query.timeZone != null) return readValue(query.timeZone);
+  return exactWindow ? normalizeInvestigationTimeZone(query.timeZone) : undefined;
 }
 
 function parseAliasedContext(params: URLSearchParams) {
@@ -173,6 +197,7 @@ function appendSignalParams(params: URLSearchParams, query: ExploreQuery) {
   if (query.signal === 'logs') {
     if (query.live) params.set('mode', 'live');
     setValue(params, 'severityText', query.severityText);
+    setOpaqueRouteValue(params, 'logRecordUid', query.logRecordUid);
     setEnabled(params, 'hideInternal', query.hideInternal);
     setEnabled(params, 'hideNoise', query.hideNoise);
     return;
@@ -196,6 +221,10 @@ function readTimeRange(value: string | null): ExploreTimeRange {
 
 function readValue(value: string | null) {
   return value?.trim() || undefined;
+}
+
+function readOpaqueRouteValue(params: URLSearchParams, key: string) {
+  return params.has(key) ? (params.get(key)?.trim() ?? '') : undefined;
 }
 
 function readAutoRefresh(value: string | null) {
@@ -235,6 +264,10 @@ function aliasedValue(params: URLSearchParams, canonical: string, alias: string)
 
 function setValue(params: URLSearchParams, key: string, value: string | undefined) {
   if (value) params.set(key, value);
+}
+
+function setOpaqueRouteValue(params: URLSearchParams, key: string, value: string | undefined) {
+  if (value !== undefined) params.set(key, value);
 }
 
 function setEnabled(params: URLSearchParams, key: string, value: boolean | undefined) {

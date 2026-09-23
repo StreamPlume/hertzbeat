@@ -60,6 +60,22 @@ public class EntityAlertEvidenceReadModelService {
         return entityAlertEvidenceQueryService.findActiveAlerts(monitors, limit, requestWorkspaceId);
     }
 
+    /**
+     * Returns exact current-alert count plus a bounded preview for one Monitor scope.
+     */
+    public Page<SingleAlert> queryActiveAlertPage(List<Monitor> monitors,
+                                                 int pageIndex,
+                                                 int pageSize,
+                                                 String requestWorkspaceId) {
+        PageRequest pageRequest = normalizePageRequest(
+                pageIndex, pageSize, Sort.by(Sort.Direction.DESC, "gmtUpdate"));
+        if (CollectionUtils.isEmpty(monitors)) {
+            return Page.empty(pageRequest);
+        }
+        return entityAlertEvidenceQueryService.findActiveAlertPage(
+                monitors, pageRequest.getPageNumber(), pageRequest.getPageSize(), requestWorkspaceId);
+    }
+
     public Page<SingleAlert> buildEntityAlertPage(List<Monitor> monitors, String status, String severity,
                                                   int pageIndex, int pageSize) {
         PageRequest pageRequest = normalizePageRequest(pageIndex, pageSize, Sort.by(Sort.Direction.DESC, "gmtUpdate"));

@@ -19,20 +19,22 @@ package org.apache.hertzbeat.manager.controller;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.apache.hertzbeat.common.constants.CommonConstants;
 import org.apache.hertzbeat.common.entity.manager.Monitor;
 import org.apache.hertzbeat.common.entity.manager.Param;
 import org.apache.hertzbeat.common.util.JsonUtil;
 import org.apache.hertzbeat.manager.pojo.dto.MonitorDto;
 import org.apache.hertzbeat.manager.pojo.dto.MonitorInvestigationBindingInfo;
+import org.apache.hertzbeat.manager.pojo.dto.MonitorSignalView;
 import org.apache.hertzbeat.manager.service.entity.MonitorInvestigationReadModelService;
 import org.apache.hertzbeat.manager.service.impl.MonitorServiceImpl;
+import org.apache.hertzbeat.manager.support.GlobalExceptionHandler;
 import org.apache.hertzbeat.manager.support.exception.MonitorCopySourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,7 +92,9 @@ class MonitorControllerTest {
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(monitorController).build();
+        this.mockMvc = MockMvcBuilders.standaloneSetup(monitorController)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
     }
 
     @Test
@@ -204,41 +208,88 @@ class MonitorControllerTest {
     }
 
     @Test
-    void getMonitorInvestigationReturnsOnlyTheResolvedExactBinding() throws Exception {
-        Mockito.when(monitorInvestigationReadModelService.resolve(6565463543L))
-                .thenReturn(Optional.of(new MonitorInvestigationBindingInfo(
-                        6565463543L,
-                        7L,
-                        "service",
-                        "checkout",
-                        "commerce",
-                        "production",
+    void getMonitorInvestigationReturnsBoundedSignalView() throws Exception {
+        long monitorId = 6565463543L;
+        long start = 1_777_000_000_000L;
+        long end = start + 3_600_000L;
+        Monitor monitor = Monitor.builder().id(monitorId).name("checkout-monitor").instance("db:3306").build();
+        MonitorSignalView view = new MonitorSignalView(
+                monitorId,
+                new MonitorSignalView.Window(start, end),
+                MonitorSignalView.CollectionBlock.ready(new MonitorSignalView.CollectionEvent(
+                        start + 60_000L, 700L, "SUCCESS", "collector-1", "db:3306",
+                        "availability", "NONE", "QUERY", 2, 4)),
+                MonitorSignalView.AlertsBlock.ready(1L, List.of(new MonitorSignalView.AlertPreview(
+                        701L, "firing", null, "Checkout failed", start + 30_000L))),
+                MonitorSignalView.BindingBlock.ready(new MonitorInvestigationBindingInfo(
+                        monitorId, 7L, "service", "checkout", "commerce", "production",
                         List.of("metrics", "logs"))));
+        Mockito.when(monitorService.getMonitor(monitorId)).thenReturn(monitor);
+        Mockito.when(monitorInvestigationReadModelService.query(monitor, start, end)).thenReturn(view);
 
-        this.mockMvc.perform(MockMvcRequestBuilders.get("/api/monitor/{id}/investigation", 6565463543L))
+        this.mockMvc.perform(MockMvcRequestBuilders.get("/api/monitor/{id}/investigation", monitorId)
+                        .param("start", Long.toString(start))
+                        .param("end", Long.toString(end)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data.monitorId").value(6565463543L))
-                .andExpect(jsonPath("$.data.entityId").value(7L))
-                .andExpect(jsonPath("$.data.entityType").value("service"))
-                .andExpect(jsonPath("$.data.serviceName").value("checkout"))
-                .andExpect(jsonPath("$.data.signals[0]").value("metrics"))
-                .andExpect(jsonPath("$.data.signals[1]").value("logs"));
+                .andExpect(jsonPath("$.data.monitorId").value(monitorId))
+                .andExpect(jsonPath("$.data.window.start").value(start))
+                .andExpect(jsonPath("$.data.window.end").value(end))
+                .andExpect(jsonPath("$.data.collection.state").value("ready"))
+                .andExpect(jsonPath("$.data.collection.source").value("greptime_collection_events"))
+                .andExpect(jsonPath("$.data.collection.event.observedAt").value(start + 60_000L))
+                .andExpect(jsonPath("$.data.alerts.state").value("ready"))
+                .andExpect(jsonPath("$.data.alerts.source").value("current_alerts"))
+                .andExpect(jsonPath("$.data.alerts.scope").value("current"))
+                .andExpect(jsonPath("$.data.alerts.activeCount").value(1L))
+                .andExpect(jsonPath("$.data.alerts.previews[0].severity").value(nullValue()))
+                .andExpect(jsonPath("$.data.binding.state").value("ready"))
+                .andExpect(jsonPath("$.data.binding.identity.entityId").value(7L))
+                .andExpect(jsonPath("$.data.binding.identity.signals[0]").value("metrics"));
 
-        Mockito.verify(monitorInvestigationReadModelService).resolve(6565463543L);
+        Mockito.verify(monitorInvestigationReadModelService).query(monitor, start, end);
     }
 
     @Test
-    void getMonitorInvestigationDoesNotFabricateMissingBinding() throws Exception {
-        Mockito.when(monitorInvestigationReadModelService.resolve(6565463543L))
-                .thenReturn(Optional.empty());
+    void getMonitorInvestigationKeepsExistingMissingMonitorFailure() throws Exception {
+        long monitorId = 6565463543L;
 
-        this.mockMvc.perform(MockMvcRequestBuilders.get("/api/monitor/{id}/investigation", 6565463543L))
+        this.mockMvc.perform(MockMvcRequestBuilders.get("/api/monitor/{id}/investigation", monitorId)
+                        .param("start", "1777000000000")
+                        .param("end", "1777003600000"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
-                .andExpect(jsonPath("$.data").doesNotExist());
+                .andExpect(jsonPath("$.code").value((int) CommonConstants.MONITOR_NOT_EXIST_CODE))
+                .andExpect(jsonPath("$.msg").value("Monitor not exist."));
 
-        Mockito.verify(monitorInvestigationReadModelService).resolve(6565463543L);
+        Mockito.verify(monitorService).getMonitor(monitorId);
+        Mockito.verifyNoInteractions(monitorInvestigationReadModelService);
+    }
+
+    @Test
+    void getMonitorInvestigationRejectsInvalidWindow() throws Exception {
+        long monitorId = 6565463543L;
+        Monitor monitor = Monitor.builder().id(monitorId).build();
+        Mockito.when(monitorService.getMonitor(monitorId)).thenReturn(monitor);
+        Mockito.when(monitorInvestigationReadModelService.query(monitor, 0L, 1L))
+                .thenThrow(new IllegalArgumentException("monitor_signal_window_invalid"));
+
+        this.mockMvc.perform(MockMvcRequestBuilders.get("/api/monitor/{id}/investigation", monitorId)
+                        .param("start", "0")
+                        .param("end", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value((int) CommonConstants.PARAM_INVALID_CODE))
+                .andExpect(jsonPath("$.msg").value("monitor_signal_window_invalid"));
+    }
+
+    @Test
+    void getMonitorInvestigationRequiresBothWindowBounds() throws Exception {
+        this.mockMvc.perform(MockMvcRequestBuilders.get(
+                        "/api/monitor/{id}/investigation", 6565463543L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value((int) CommonConstants.PARAM_INVALID_CODE))
+                .andExpect(jsonPath("$.msg").value("monitor_signal_window_invalid"));
+
+        Mockito.verifyNoInteractions(monitorService, monitorInvestigationReadModelService);
     }
 
     @Test

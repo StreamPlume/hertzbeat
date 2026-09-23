@@ -29,6 +29,7 @@ import org.apache.hertzbeat.common.constants.CommonConstants;
 import org.apache.hertzbeat.common.entity.alerter.SingleAlert;
 import org.apache.hertzbeat.common.entity.manager.Monitor;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenScopes;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -56,15 +57,26 @@ public class EntityAlertEvidenceQueryService {
     }
 
     public List<SingleAlert> findActiveAlerts(List<Monitor> monitors, int limit, String requestWorkspaceId) {
+        return findActiveAlertPage(monitors, 0, limit, requestWorkspaceId).getContent();
+    }
+
+    /**
+     * Returns a bounded current-alert preview while preserving the exact database-backed total count.
+     */
+    public Page<SingleAlert> findActiveAlertPage(List<Monitor> monitors,
+                                                int pageIndex,
+                                                int pageSize,
+                                                String requestWorkspaceId) {
+        int safePageIndex = Math.max(0, pageIndex);
+        int safePageSize = pageSize <= 0 ? 20 : Math.min(pageSize, 100);
+        PageRequest pageRequest = PageRequest.of(
+                safePageIndex, safePageSize, Sort.by(Sort.Direction.DESC, "gmtUpdate"));
         if (CollectionUtils.isEmpty(monitors)) {
-            return Collections.emptyList();
+            return Page.empty(pageRequest);
         }
-        int safeLimit = limit <= 0 ? 20 : limit;
-        PageRequest pageRequest = PageRequest.of(0, safeLimit, Sort.by(Sort.Direction.DESC, "gmtUpdate"));
         return singleAlertDao.findAll(
-                        buildAlertSpecification(monitors, CommonConstants.ALERT_STATUS_FIRING, requestWorkspaceId),
-                        pageRequest)
-                .getContent();
+                buildAlertSpecification(monitors, CommonConstants.ALERT_STATUS_FIRING, requestWorkspaceId),
+                pageRequest);
     }
 
     public List<SingleAlert> findAlerts(List<Monitor> monitors, String status) {

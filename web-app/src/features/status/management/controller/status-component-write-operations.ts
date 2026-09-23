@@ -24,9 +24,9 @@ export type ComponentWriteContext = {
   retireIncidentDetail: () => void;
   notify: StatusManagementNotifications;
   queryClient: QueryClient;
-  committedDeletes: React.RefObject<Set<number>>;
-  recovery: React.RefObject<StatusWriteRecovery<StatusComponent> | undefined>;
-  recoveryProofPending: React.RefObject<boolean>;
+  committedDeletes: React.MutableRefObject<Set<number>>;
+  recovery: React.MutableRefObject<StatusWriteRecovery<StatusComponent> | undefined>;
+  recoveryProofPending: React.MutableRefObject<boolean>;
   setSaving: (value: boolean) => void;
   setWriteRecovery: (value: StatusWriteRecovery<StatusComponent>['stage'] | undefined) => void;
 };

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import { ApiMessageError, apiMessageGet } from '@/core/http/api-message';
+import { apiMessageGet } from '@/core/http/api-message';
 import { openBrowserEventStream } from '@/core/http/event-stream';
 import { QUERY_CONTEXT_FIELDS } from '@/shared/query-context';
 
@@ -35,14 +35,23 @@ import {
   parseMetricStep,
   parseTraceDuration
 } from '../model/explore-field-contract';
-import { ExploreSignalContractError, ExploreSignalMissingError } from '../model/explore-signal-contract';
-import { parseLogOverview, parseLogPage, parseLogRow, parseLogStreamGap, parseLogTrend } from './explore-log-schema';
+import { ExploreSignalContractError } from '../model/explore-signal-contract';
+import {
+  parseLiveLogRow,
+  parseLogOverview,
+  parseLogPage,
+  parseLogStreamGap,
+  parseLogTrend
+} from './explore-log-schema';
 import { parseMetricConsole, parseMetricInventory } from './explore-metric-schema';
-import { parseTraceDetail, parseTracePage, parseTraceSpans } from './explore-trace-schema';
+import { parseTracePage } from './explore-trace-schema';
+
+export { classifyExploreSignalError } from './explore-signal-api-model';
 
 export async function loadMetricSignal(query: MetricExploreQuery, signal?: AbortSignal) {
   const observedAt = Date.now();
   const resolvedQuery = query.query?.trim() ? query : await resolveInventoryMetricQuery(query, observedAt, signal);
+  if (!resolvedQuery) return { kind: 'inventory_empty' } as const;
   return parseMetricConsole(await apiMessageGet(buildSignalApiPath(resolvedQuery, observedAt), requestSignal(signal)));
 }
 
@@ -53,6 +62,7 @@ export async function loadLogSignal(query: LogExploreQuery, signal?: AbortSignal
 
 export async function loadLogHistoryEvidence(query: LogExploreQuery, signal?: AbortSignal) {
   const observedAt = Date.now();
+  const requestWindow = resolveSignalWindow(query, observedAt);
   const page = parseLogPage(
     await apiMessageGet(buildSignalApiPath(query, observedAt), requestSignal(signal)),
     query.pageIndex ?? 0,
@@ -60,7 +70,9 @@ export async function loadLogHistoryEvidence(query: LogExploreQuery, signal?: Ab
   );
   const [overview, trend] = await Promise.allSettled([
     apiMessageGet(buildLogStatsApiPath(query, 'overview', observedAt), requestSignal(signal)).then(parseLogOverview),
-    apiMessageGet(buildLogStatsApiPath(query, 'trend', observedAt), requestSignal(signal)).then(parseLogTrend)
+    apiMessageGet(buildLogStatsApiPath(query, 'trend', observedAt), requestSignal(signal))
+      .then(parseLogTrend)
+      .then(trend => requireTrendWindow(trend, requestWindow))
   ]);
   if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
   return {
@@ -74,43 +86,6 @@ export async function loadLogHistoryEvidence(query: LogExploreQuery, signal?: Ab
 export async function loadTraceSignal(query: TraceExploreQuery, signal?: AbortSignal) {
   const pageIndex = query.pageIndex ?? 0;
   return parseTracePage(await apiMessageGet(buildSignalApiPath(query), requestSignal(signal)), pageIndex, 20);
-}
-
-export async function loadTraceDetail(query: TraceExploreQuery, traceId: string, signal?: AbortSignal) {
-  if (!traceId) throw new ExploreSignalContractError('traceId is required');
-  const observedAt = Date.now();
-  const [detail, spans] = await Promise.all([
-    apiMessageGet(buildTraceDetailApiPath(query, traceId, false, observedAt), requestSignal(signal)),
-    apiMessageGet(buildTraceDetailApiPath(query, traceId, true, observedAt), requestSignal(signal))
-  ]);
-  return { ...parseTraceDetail(detail, traceId), spans: parseTraceSpans(spans, traceId) };
-}
-
-export function buildTraceDetailApiPath(query: TraceExploreQuery, traceId: string, spans = false, now = Date.now()) {
-  requireQueryableScope(query);
-  if (!traceId) throw new ExploreSignalContractError('traceId is required');
-  const params = sharedSignalParams(query, now);
-  setValue(params, 'spanId', query.spanId);
-  setValue(params, 'resourceFilter', query.resourceFilter);
-  setValue(params, 'attributeFilter', query.attributeFilter);
-  if (query.minDurationMs != null) params.set('minDurationMs', String(query.minDurationMs));
-  if (query.maxDurationMs != null) params.set('maxDurationMs', String(query.maxDurationMs));
-  return `/api/traces/${encodeURIComponent(traceId)}${spans ? '/spans' : ''}?${params.toString()}`;
-}
-
-export function classifyExploreSignalError(
-  reason: unknown
-): 'missing' | 'permission' | 'transport_error' | 'contract_error' | 'error' {
-  if (reason instanceof ExploreSignalMissingError) return 'missing';
-  if (reason instanceof ExploreSignalContractError) return 'contract_error';
-  if (reason instanceof ApiMessageError) {
-    if (reason.status === 404 || (reason.status === 200 && reason.code === 3)) return 'missing';
-    if (reason.status === 401 || reason.status === 403) return 'permission';
-    if (reason.cause !== undefined || reason.status === undefined || [0, 502, 503, 504].includes(reason.status)) {
-      return 'transport_error';
-    }
-  }
-  return 'error';
 }
 
 export function buildSignalApiPath(query: ExploreQuery, now = Date.now()) {
@@ -190,7 +165,7 @@ export function openLogStream(
   path: string,
   handlers: {
     onOpen: () => void;
-    onLog: (row: ReturnType<typeof parseLogRow>) => void;
+    onLog: (row: ReturnType<typeof parseLiveLogRow>) => void;
     onGap: (gap: ReturnType<typeof parseLogStreamGap>) => void;
     onRetrying: () => void;
     onUnavailable: () => void;
@@ -206,7 +181,7 @@ export function openLogStream(
       try {
         const value = JSON.parse(data) as unknown;
         if (name === 'LOG_STREAM_GAP') handlers.onGap(parseLogStreamGap(value));
-        else handlers.onLog(parseLogRow(value));
+        else handlers.onLog(parseLiveLogRow(value));
       } catch (error) {
         if (error instanceof ExploreSignalContractError || error instanceof SyntaxError) {
           handlers.onContractError();
@@ -221,28 +196,46 @@ export function openLogStream(
 function sharedSignalParams(query: ExploreQuery, now: number) {
   const params = new URLSearchParams();
   const scoped = exploreHandoffState(query) === 'scoped';
-  const exact = exploreUsesExactWindow(query);
+  const window = resolveSignalWindow(query, now);
+  setValue(params, QUERY_CONTEXT_FIELDS.entityId, query.entityId);
   setValue(params, 'serviceName', query.serviceName);
   setValue(params, 'serviceNamespace', query.serviceNamespace);
   setValue(params, 'environment', query.environment);
   if (scoped) setValue(params, 'collectorId', query.collectorId);
   appendOptionalDimensions(params, query);
   // Relative windows slide on every request; route timestamps are authoritative only for an exact window.
-  params.set('start', String(exact ? query.start : now - timeRangeMilliseconds(query.timeRange)));
-  params.set('end', String(exact ? query.end : now));
+  params.set('start', String(window.start));
+  params.set('end', String(window.end));
   return params;
+}
+
+function resolveSignalWindow(query: ExploreQuery, observedAt: number) {
+  if (exploreUsesExactWindow(query)) {
+    return { start: query.start!, end: query.end! };
+  }
+  return { start: observedAt - timeRangeMilliseconds(query.timeRange), end: observedAt };
+}
+
+function requireTrendWindow<T extends { start: number; end: number }>(
+  trend: T,
+  requestWindow: { start: number; end: number }
+) {
+  if (trend.start !== requestWindow.start || trend.end !== requestWindow.end) {
+    throw new ExploreSignalContractError('Log trend does not match request window');
+  }
+  return trend;
 }
 
 async function resolveInventoryMetricQuery(
   query: MetricExploreQuery,
   observedAt: number,
   signal?: AbortSignal
-): Promise<MetricExploreQuery> {
+): Promise<MetricExploreQuery | undefined> {
   const inventory = parseMetricInventory(
     await apiMessageGet(buildMetricInventoryApiPath(query, observedAt), requestSignal(signal))
   );
-  // A successfully empty inventory has no metric to select; `up` is the stable established fallback.
-  return { ...query, query: inventory.items[0]?.metricName ?? 'up' };
+  const metricName = inventory.items[0]?.metricName;
+  return metricName ? { ...query, query: metricName } : undefined;
 }
 
 function buildMetricInventoryApiPath(query: MetricExploreQuery, now = Date.now()) {

@@ -26,6 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import org.apache.hertzbeat.alert.dto.AlertGroupEvidence;
@@ -35,9 +37,12 @@ import org.apache.hertzbeat.alert.service.AlertGroupEvidenceRequestException;
 import org.apache.hertzbeat.alert.service.AlertGroupEvidenceService;
 import org.apache.hertzbeat.alert.service.AlertGroupNotFoundException;
 import org.apache.hertzbeat.alert.service.AlertGroupStatusNotSupportedException;
+import org.apache.hertzbeat.alert.service.AlertInvestigationReadModelService;
 import org.apache.hertzbeat.alert.service.AlertService;
 import org.apache.hertzbeat.common.constants.CommonConstants;
 import org.apache.hertzbeat.common.entity.alerter.GroupAlert;
+import org.apache.hertzbeat.common.observability.dto.investigation.AlertInvestigationView;
+import org.apache.hertzbeat.common.observability.dto.investigation.InvestigationReason;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenRequestContext;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenScopes;
 import org.junit.jupiter.api.AfterEach;
@@ -56,6 +61,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.apache.hertzbeat.warehouse.query.admission.ObservabilityQueryAdmissionService;
 
 /**
  * Test case for {@link AlertsController}
@@ -77,6 +83,12 @@ class AlertsControllerTest {
 
     @Mock
     private AlertGroupEvidenceService alertGroupEvidenceService;
+
+    @Mock
+    private AlertInvestigationReadModelService alertInvestigationReadModelService;
+
+    @Mock
+    private ObservabilityQueryAdmissionService queryAdmissionService;
 
     private List<Long> ids;
 
@@ -140,6 +152,52 @@ class AlertsControllerTest {
                 .andExpect(jsonPath("$.data.number").doesNotExist())
                 .andExpect(jsonPath("$.data.size").doesNotExist())
                 .andReturn();
+    }
+
+    @Test
+    void alertInvestigationUsesTrustedWorkspaceOneAdmissionAndExactWindow() throws Exception {
+        long start = 1_787_934_874_000L;
+        long end = start + 60_000L;
+        AlertInvestigationView view = investigation(start, end);
+        Mockito.when(queryAdmissionService.execute(Mockito.eq("topology"), Mockito.any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
+        Mockito.when(alertInvestigationReadModelService.query(WORKSPACE_ID, 7L, start, end)).thenReturn(view);
+
+        mockMvc.perform(MockMvcRequestBuilders.get("/api/alerts/7/investigation")
+                        .param("start", Long.toString(start))
+                        .param("end", Long.toString(end)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value((int) CommonConstants.SUCCESS_CODE))
+                .andExpect(jsonPath("$.data.alertId").value(7))
+                .andExpect(jsonPath("$.data.window.anchor").value(start + 1L))
+                .andExpect(jsonPath("$.data.logs.source").value("greptime_logs"));
+
+        Mockito.verify(queryAdmissionService, Mockito.times(1))
+                .execute(Mockito.eq("topology"), Mockito.any());
+        Mockito.verify(alertInvestigationReadModelService).query(WORKSPACE_ID, 7L, start, end);
+    }
+
+    @Test
+    void invalidAlertInvestigationSelectionFailsBeforeAdmission() throws Exception {
+        mockMvc.perform(MockMvcRequestBuilders.get("/api/alerts/0/investigation")
+                        .param("start", "100")
+                        .param("end", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value((int) CommonConstants.FAIL_CODE));
+
+        Mockito.verify(queryAdmissionService, Mockito.never()).execute(Mockito.anyString(), Mockito.any());
+        Mockito.verify(alertInvestigationReadModelService, Mockito.never())
+                .query(Mockito.anyString(), Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong());
+    }
+
+    private AlertInvestigationView investigation(long start, long end) {
+        return new AlertInvestigationView(7L,
+                new AlertInvestigationView.Window(start, end, start + 1L),
+                new AlertInvestigationView.AlertHeader("High latency", "firing", "critical", "slow", null,
+                        Map.of(), Map.of()), AlertInvestigationView.IdentityBlock.unavailable(),
+                AlertInvestigationView.MetricsBlock.unavailable(InvestigationReason.QUERY_STRATEGY_UNAVAILABLE),
+                AlertInvestigationView.LogsBlock.empty(), AlertInvestigationView.TracesBlock.empty(),
+                AlertInvestigationView.TopologyBlock.empty(), AlertInvestigationView.CollectionBlock.empty());
     }
 
     @Test

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type MutableRefObject } from 'react';
 
 import { openLogStream } from '../api/explore-api';
 import {
@@ -29,7 +29,7 @@ import {
 type LiveLogStreamOptions = {
   path: string;
   connectionScope: string;
-  evidenceScopeRef: RefObject<string>;
+  evidenceScopeRef: MutableRefObject<string>;
   paused: boolean;
   retryRevision: number;
   setConnectionState: ConnectionSetter;
@@ -81,7 +81,7 @@ export function useLiveLogStream(options: LiveLogStreamOptions) {
 type OwnedLiveLogStreamOptions = {
   path: string;
   connectionScope: string;
-  evidenceScopeRef: RefObject<string>;
+  evidenceScopeRef: MutableRefObject<string>;
   setConnectionState: ConnectionSetter;
   setEvidenceState: EvidenceSetter;
   token: symbol;

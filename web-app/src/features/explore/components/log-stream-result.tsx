@@ -18,7 +18,7 @@
 import { Alert, Button } from 'antd';
 import type { TFunction } from 'i18next';
 
-import { LIVE_LOG_RETENTION_LIMIT, type LogRow } from '../model/explore-signal-contract';
+import { LIVE_LOG_RETENTION_LIMIT, type LiveLogRow } from '../model/explore-signal-contract';
 import type { LogExploreQuery } from '../model/explore-model';
 import type { LiveLogStatus } from '../model/explore-signal-model';
 import { LogRows } from './log-rows';
@@ -26,7 +26,7 @@ import styles from './log-result.module.css';
 import { SignalEmptyState, SignalResultFrame } from './signal-result-frame';
 
 export type LiveLogView = {
-  rows: LogRow[];
+  rows: LiveLogRow[];
   status: LiveLogStatus;
   gapDroppedCount?: number | undefined;
   locallyDroppedCount?: number | undefined;

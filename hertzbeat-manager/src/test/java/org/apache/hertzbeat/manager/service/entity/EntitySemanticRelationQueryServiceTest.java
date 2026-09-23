@@ -17,6 +17,7 @@
 
 package org.apache.hertzbeat.manager.service.entity;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,6 +45,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 @ExtendWith(MockitoExtension.class)
 class EntitySemanticRelationQueryServiceTest {
@@ -194,6 +196,19 @@ class EntitySemanticRelationQueryServiceTest {
         assertTrue(result.relations().isEmpty());
         assertTrue(result.entityById().isEmpty());
         verify(entityWorkspaceAccessService, never()).findAccessibleEntitiesByIds(any(), any());
+    }
+
+    @Test
+    void springContextWiresTheProductionConstructor() {
+        new ApplicationContextRunner()
+                .withBean(SemanticGraphQueryRepository.class, () -> repository)
+                .withBean(EntityIdentityQueryService.class, () -> entityIdentityQueryService)
+                .withBean(EntityWorkspaceAccessService.class, () -> entityWorkspaceAccessService)
+                .withBean(EntitySemanticRelationQueryService.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(EntitySemanticRelationQueryService.class);
+                });
     }
 
     private ObserveEntity entity(long id, String name) {

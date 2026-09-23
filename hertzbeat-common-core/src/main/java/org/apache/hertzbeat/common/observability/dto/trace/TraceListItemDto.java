@@ -48,5 +48,9 @@ public class TraceListItemDto {
 
     private int errorSpanCount;
 
+    private Long spanCount;
+
+    private Map<String, TraceServiceStatsDto> serviceStats;
+
     private Map<String, String> resourceAttributes;
 }

@@ -11,6 +11,7 @@ import {
 } from '@/shared/operational-page';
 
 import type { EntityDetailEvidence, EntityMonitorViewState, EntityNoiseControlType } from '../model/entity-view-model';
+import type { EntitySignalViewState } from '../model/entity-signal-view-model';
 import { entityExploreSignals, type EntityExploreSignal } from '../model/entity-operational-navigation';
 import type { EntityMonitorQuery, EntityNextActionType } from '../model/entity-contract';
 import { localizeEntityCode } from '../model/entity-display';
@@ -19,6 +20,7 @@ import { DegradedEntityDetail } from './entity-detail-degraded';
 import { EntityEvidenceLists } from './entity-evidence-lists';
 import { EntityNoiseControlEvidence } from './entity-noise-control-evidence';
 import { EntityOperationalGuidance } from './entity-operational-guidance';
+import { EntitySignalView } from './entity-signal-view';
 
 type EntityDetailViewActions = {
   refresh: () => void;
@@ -45,6 +47,7 @@ export function EntityDetailView({
     canWrite: boolean;
     canDelete: boolean;
     monitors: EntityMonitorViewState;
+    signals?: EntitySignalViewState | undefined;
     deleting: boolean;
     deleteFailure?: 'permission' | 'validation' | 'unavailable' | 'error';
   };
@@ -53,7 +56,7 @@ export function EntityDetailView({
   const { t } = useTranslation();
   const evidence = state.evidence;
   if (evidence.kind === 'degraded') {
-    return <DegradedEntityDetail entity={evidence.entity} state={state} actions={actions} />;
+    return <DegradedEntityDetail entity={evidence.entity} state={state} actions={actions} signals={state.signals} />;
   }
   if (evidence.kind !== 'ready') {
     const stateCopy = {
@@ -84,6 +87,7 @@ function ReadyEntityDetail({
     canWrite: boolean;
     canDelete: boolean;
     monitors: EntityMonitorViewState;
+    signals?: EntitySignalViewState | undefined;
     deleteFailure?: 'permission' | 'validation' | 'unavailable' | 'error';
   };
   actions: EntityDetailViewActions;
@@ -95,6 +99,9 @@ function ReadyEntityDetail({
       {state.deleteFailure ? (
         <Alert showIcon type="error" message={t(`entity.delete.failure.${state.deleteFailure}`)} />
       ) : null}
+      {state.signals ? (
+        <EntitySignalView state={state.signals} openSignal={actions.explore} openTopology={actions.topology} />
+      ) : null}
       <EntityDetailMetadata detail={detail} />
       <EntityOperationalGuidance detail={detail} canWrite={state.canWrite} act={actions.nextAction} />
       {detail.noiseControls ? (
@@ -105,15 +112,18 @@ function ReadyEntityDetail({
   );
 }
 
-function EntityDetailHeader({
-  detail,
-  state,
-  actions
-}: {
+type EntityDetailHeaderProps = {
   detail: Extract<EntityDetailEvidence, { kind: 'ready' }>['detail'];
-  state: { deleting: boolean; refreshing: boolean; canWrite: boolean; canDelete: boolean };
+  state: {
+    deleting: boolean;
+    refreshing: boolean;
+    canWrite: boolean;
+    canDelete: boolean;
+  };
   actions: EntityDetailViewActions;
-}) {
+};
+
+function EntityDetailHeader({ detail, state, actions }: EntityDetailHeaderProps) {
   const { t } = useTranslation();
   const exploreSignals = entityExploreSignals(detail);
   return (

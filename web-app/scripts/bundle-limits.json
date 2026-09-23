@@ -3,5 +3,13 @@
   "vendorChunkMinBytes": 512000,
   "vendorChunkMaxBytes": 614400,
   "shellGzipBytes": 460800,
-  "totalJavaScriptBytes": 7100000
+  "baseApplicationJavaScriptBytes": 7100000,
+  "persesRuntimeJavaScriptAllowanceBytes": 1400000,
+  "persesMultiSignalJavaScriptAllowanceBytes": 600000,
+  "observabilityWorkbenchJavaScriptAllowanceBytes": 40000,
+  "alertInvestigationJavaScriptAllowanceBytes": 40000,
+  "persesDynamicRuntimeSources": [
+    "src/platform/perses/runtime/perses-time-series-runtime.tsx",
+    "src/platform/perses/runtime/perses-signal-runtime.tsx"
+  ]
 }

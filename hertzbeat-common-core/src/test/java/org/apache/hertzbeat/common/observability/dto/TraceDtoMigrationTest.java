@@ -39,7 +39,7 @@ class TraceDtoMigrationTest {
                 "service/src/main",
                 "service error",
                 "service error");
-        TraceSpanEventDto event = new TraceSpanEventDto(1L, "exception", Map.of("error", true), 0);
+        TraceSpanEventDto event = new TraceSpanEventDto("1", "exception", Map.of("error", true), 0);
         TraceSpanLinkDto link = new TraceSpanLinkDto("trace-1", "span-2", "state", Map.of("peer.service", "checkout"), 0);
         TraceSpanNodeDto span = new TraceSpanNodeDto(
                 "trace-1",

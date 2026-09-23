@@ -119,7 +119,7 @@ function NavigationFlyoutPanel({
 }: {
   activeTrail: string[];
   flyoutId: string;
-  flyoutRef: RefObject<HTMLElement | null>;
+  flyoutRef: RefObject<HTMLElement>;
   item: ShellNavigationItem;
   label: string;
   onClose: () => void;

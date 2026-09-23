@@ -18,7 +18,7 @@
 import { Button, Descriptions, Drawer, Typography } from 'antd';
 import type { TFunction } from 'i18next';
 
-import type { LogRow } from '../model/explore-signal-contract';
+import type { LiveLogRow, LogRow } from '../model/explore-signal-contract';
 import { buildCrossSignalPath, type LogExploreQuery } from '../model/explore-model';
 import { logBody } from '../model/explore-signal-model';
 import { formatLogTime } from './log-display';
@@ -32,7 +32,7 @@ export function LogDetail({
   navigate,
   onClose
 }: {
-  row?: LogRow | undefined;
+  row?: LogRow | LiveLogRow | undefined;
   t: TFunction;
   query: LogExploreQuery;
   navigate: (path: string) => void;

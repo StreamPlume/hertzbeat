@@ -25,8 +25,38 @@ import vitestResourcePolicy from './vitest-resource-policy.json' with { type: 'j
 const packageManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const preCommitHook = readFileSync(new URL('../../.githooks/pre-commit', import.meta.url), 'utf8');
 
-test('the Ant Design React 19 compatibility patch is an exact production dependency', () => {
-  assert.equal(packageManifest.dependencies['@ant-design/v5-patch-for-react-19'], '1.0.3');
+test('the application uses one exact React 18 runtime for embedded Perses', () => {
+  assert.equal(packageManifest.dependencies.react, '18.3.1');
+  assert.equal(packageManifest.dependencies['react-dom'], '18.3.1');
+  assert.equal(packageManifest.devDependencies['@types/react'], '18.3.28');
+  assert.equal(packageManifest.devDependencies['@types/react-dom'], '18.3.7');
+  assert.equal(packageManifest.dependencies['@ant-design/v5-patch-for-react-19'], undefined);
+});
+
+test('the Perses runtime boundary uses fixed supported packages without deprecated core', () => {
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(packageManifest.dependencies)
+        .filter(([name]) => name.startsWith('@perses-dev/'))
+        .sort(([left], [right]) => left.localeCompare(right))
+    ),
+    {
+      '@perses-dev/client': '0.54.0',
+      '@perses-dev/components': '0.54.0',
+      '@perses-dev/dashboards': '0.54.0',
+      // plugin-system's published aggregate runtime resolves Explore even though
+      // the HertzBeat snapshot adapter does not import or render Explore itself.
+      '@perses-dev/explore': '0.54.0',
+      '@perses-dev/logs-table-plugin': '0.3.0',
+      '@perses-dev/plugin-system': '0.54.0',
+      '@perses-dev/spec': '0.2.0',
+      '@perses-dev/timeseries-chart-plugin': '0.13.0',
+      '@perses-dev/trace-table-plugin': '0.11.0',
+      '@perses-dev/tracing-gantt-chart-plugin': '0.13.0'
+    }
+  );
+  assert.equal(packageManifest.dependencies['@perses-dev/core'], undefined);
+  assert.deepEqual(packageManifest.knip.ignoreDependencies, ['@perses-dev/explore']);
 });
 
 test('the release gate checks formatting and the worktree diff without writing files', () => {

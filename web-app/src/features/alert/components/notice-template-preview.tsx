@@ -38,7 +38,7 @@ export function NoticeTemplatePreview({ content }: NoticeTemplatePreviewProps) {
     () => noticeTemplatePreviewTokens(content.length, matches, bodyOffset),
     [bodyOffset, content.length, matches]
   );
-  const bodyRef = useRef<HTMLSpanElement | null>(null);
+  const bodyRef = useRef<HTMLSpanElement>(null);
   const matchRefs = useRef<Array<HTMLElement | null>>([]);
   const activeMatch = matches.length > 0 ? activeMatchState % matches.length : 0;
   const copyKey = previewCopyKey(copyState);
@@ -150,7 +150,7 @@ function PreviewToolbar(props: PreviewToolbarProps) {
 type PreviewSourceProps = {
   activeMatch: number;
   bodyOffset: number | null;
-  bodyRef: React.RefObject<HTMLSpanElement | null>;
+  bodyRef: React.RefObject<HTMLSpanElement>;
   content: string;
   registerMatch: (index: number, node: HTMLElement | null) => void;
   tokens: NoticeTemplatePreviewToken[];

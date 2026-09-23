@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+import { FilterOutlined } from '@ant-design/icons';
 import { Input } from 'antd';
 import type { TFunction } from 'i18next';
 
@@ -27,11 +28,37 @@ import { ExploreTraceFilters } from './explore-trace-filters';
 import styles from './explore-query-bar.module.css';
 
 type Props = Pick<ExploreSubmissionViewModel, 'draft' | 'errors' | 'updateField'> & { t: TFunction };
+type GuidedProps = Pick<ExploreSubmissionViewModel, 'draft' | 'updateField'> & { t: TFunction };
+
+export function ExploreGuidedFilters({ draft, t, updateField }: GuidedProps) {
+  return (
+    <details className={styles.guided} open={hasGuidedFilter(draft) || undefined}>
+      <summary aria-label={t('explore.addFilters')}>
+        <FilterOutlined aria-hidden />
+        <span>{t('explore.addFilters')}</span>
+      </summary>
+      <div className={styles.guidedFields}>
+        <Input
+          value={draft.serviceName}
+          aria-label={t('explore.serviceName')}
+          onChange={event => updateField({ field: 'serviceName', value: event.target.value })}
+          placeholder={t('explore.serviceName')}
+        />
+        <Input
+          value={draft.environment}
+          aria-label={t('explore.environment')}
+          onChange={event => updateField({ field: 'environment', value: event.target.value })}
+          placeholder={t('explore.environment')}
+        />
+      </div>
+    </details>
+  );
+}
 
 export function ExploreAdvancedFilters({ draft, errors, t, updateField }: Props) {
   return (
     <details className={styles.advanced} open={hasAdvancedFilter(draft) || undefined}>
-      <summary>{t('explore.advancedFilters')}</summary>
+      <summary aria-label={t('explore.advancedFilters')}>{t('explore.advancedFilters')}</summary>
       <div className={styles.advancedFields}>
         <Input
           value={draft.instance}
@@ -53,6 +80,10 @@ export function ExploreAdvancedFilters({ draft, errors, t, updateField }: Props)
       </div>
     </details>
   );
+}
+
+function hasGuidedFilter(draft: ExploreSubmissionViewModel['draft']) {
+  return [draft.serviceName, draft.environment].some(value => value != null && value !== '');
 }
 
 function hasAdvancedFilter(draft: ExploreSubmissionViewModel['draft']) {

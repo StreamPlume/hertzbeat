@@ -15,41 +15,108 @@
  * limitations under the License.
  */
 
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { OperationalPage, OperationalResultRegion } from '@/shared/operational-page';
 
 import { ExploreQueryBar } from '../components/explore-query-bar';
+import { ExploreResultAnnouncer } from '../components/explore-result-announcer';
 import { ExploreWorkbench } from '../components/explore-workbench';
+import historyStyles from '../components/explore-history-result.module.css';
+import workbenchStyles from '../components/explore-workbench.module.css';
 import { useExplorePageController } from '../controller/use-explore-page-controller';
+import { buildExplorePath } from '../model/explore-model';
+import { ExploreFocusedLogPage, ExploreFocusedTracePage } from './explore-focused-investigation';
 import { ExploreResultPanel } from './explore-result-panel';
 
 export function ExplorePage() {
   const { t } = useTranslation();
   const controller = useExplorePageController();
-  return (
-    <OperationalPage mode="workspace">
-      <ExploreWorkbench
-        query={controller.query}
-        t={t}
-        updateQuery={controller.updateQuery}
-        refresh={controller.refresh}
-        time={controller.time}
-      />
-      <ExploreQueryBar
-        query={controller.query}
-        t={t}
-        updateQuery={controller.updateManualQuery}
-        submission={controller.submission}
-      />
-      <OperationalResultRegion>
-        <ExploreResultPanel
+  if (controller.investigationRoute.kind === 'trace' && controller.query.signal === 'traces') {
+    return (
+      <OperationalPage mode="workspace">
+        <ExploreFocusedTracePage
           query={controller.query}
-          result={controller.result}
-          retry={controller.refresh}
+          t={t}
+          updateQuery={controller.updateQuery}
+          time={controller.time}
           openPath={controller.openPath}
         />
-      </OperationalResultRegion>
+      </OperationalPage>
+    );
+  }
+  if (controller.investigationRoute.kind === 'log' && controller.query.signal === 'logs') {
+    return (
+      <OperationalPage mode="workspace">
+        <ExploreFocusedLogPage
+          query={controller.query}
+          t={t}
+          updateQuery={controller.updateQuery}
+          time={controller.time}
+          openPath={controller.openPath}
+        />
+      </OperationalPage>
+    );
+  }
+  return <ExploreHistoricalWorkspace controller={controller} t={t} />;
+}
+
+function ExploreHistoricalWorkspace({
+  controller,
+  t
+}: {
+  controller: ReturnType<typeof useExplorePageController>;
+  t: TFunction;
+}) {
+  const queryBar = (
+    <ExploreQueryBar
+      query={controller.query}
+      t={t}
+      updateQuery={controller.updateManualQuery}
+      updateScope={controller.updateQuery}
+      refresh={controller.refresh}
+      time={controller.time}
+      submission={controller.submission}
+    />
+  );
+  const resultPanel = (
+    <ExploreResultPanel
+      query={controller.query}
+      result={controller.result}
+      retry={controller.refresh}
+      openPath={controller.openPath}
+    />
+  );
+  const flatLogs =
+    controller.query.signal === 'logs' && controller.result.kind === 'ready' && controller.result.signal === 'logs';
+  return (
+    <OperationalPage mode="workspace">
+      <div className={workbenchStyles.workspace} data-explore-workspace="true" data-layout="continuous">
+        <ExploreWorkbench query={controller.query} t={t} updateQuery={controller.updateQuery} />
+        <ExploreResultAnnouncer result={controller.result} queryIdentity={buildExplorePath(controller.query)} t={t} />
+        <section
+          className={workbenchStyles.signalPanel}
+          role="tabpanel"
+          id={`explore-panel-${controller.query.signal}`}
+          aria-labelledby={`explore-tab-${controller.query.signal}`}
+          data-layout="continuous"
+        >
+          {flatLogs ? (
+            <>
+              <section className={historyStyles.logRegion} data-explore-log-region="query">
+                {queryBar}
+              </section>
+              {resultPanel}
+            </>
+          ) : (
+            <>
+              {queryBar}
+              <OperationalResultRegion>{resultPanel}</OperationalResultRegion>
+            </>
+          )}
+        </section>
+      </div>
     </OperationalPage>
   );
 }

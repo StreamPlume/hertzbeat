@@ -22,6 +22,7 @@ import {
   type ExplorePageResult,
   type LogOverview,
   type LogRow,
+  type LiveLogRow,
   type LogStreamGap,
   type LogTrend
 } from '../model/explore-signal-contract';
@@ -41,9 +42,7 @@ const instrumentationScopeSchema = z.object({
   droppedAttributesCount: nullableNonNegativeIntegerSchema
 });
 
-const logRowSchema: z.ZodType<LogRow> = z.object({
-  timeUnixNano: nullableJavaLongSchema,
-  observedTimeUnixNano: nullableJavaLongSchema,
+const sharedLogRowShape = {
   severityNumber: nullableNonNegativeIntegerSchema,
   severityText: nullableStringSchema,
   body: jsonValueSchema,
@@ -56,7 +55,32 @@ const logRowSchema: z.ZodType<LogRow> = z.object({
   resourceSchemaUrl: nullableStringSchema,
   instrumentationScope: instrumentationScopeSchema.nullable(),
   scopeSchemaUrl: nullableStringSchema
-});
+};
+
+const nullablePositiveLongDecimal = z
+  .string()
+  .regex(/^[1-9]\d{0,18}$/u)
+  .refine(value => value.length < 19 || value <= '9223372036854775807')
+  .nullable();
+const nullableLogRecordUid = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u)
+  .nullable();
+const logRowSchema: z.ZodType<LogRow> = z
+  .object({
+    logRecordUid: nullableLogRecordUid,
+    timeUnixNano: nullablePositiveLongDecimal,
+    observedTimeUnixNano: nullablePositiveLongDecimal,
+    ...sharedLogRowShape
+  })
+  .strict();
+const liveLogRowSchema: z.ZodType<LiveLogRow> = z
+  .object({
+    timeUnixNano: nullableJavaLongSchema,
+    observedTimeUnixNano: nullableJavaLongSchema,
+    ...sharedLogRowShape
+  })
+  .strict();
 
 const logStreamGapSchema: z.ZodType<LogStreamGap> = z
   .object({
@@ -93,8 +117,8 @@ export function parseLogPage(value: unknown, pageIndex: number, pageSize: number
   };
 }
 
-export function parseLogRow(value: unknown): LogRow {
-  const result = logRowSchema.safeParse(value);
+export function parseLiveLogRow(value: unknown): LiveLogRow {
+  const result = liveLogRowSchema.safeParse(value);
   if (!result.success) throw new ExploreSignalContractError();
   return result.data;
 }
@@ -115,11 +139,45 @@ const logOverviewSchema: z.ZodType<LogOverview> = z.object({
   fatalCount: nonNegativeIntegerSchema
 });
 
-const hourlyStatsSchema = z
-  .record(z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:00$/u), nonNegativeIntegerSchema)
-  .refine(stats => Object.keys(stats).every(bucket => Number.isFinite(new Date(bucket.replace(' ', 'T')).getTime())));
+const logTrendIntervals = new Set([60_000, 300_000, 900_000, 1_800_000, 3_600_000, 21_600_000, 86_400_000]);
 
-const logTrendSchema: z.ZodType<LogTrend> = z.object({ hourlyStats: hourlyStatsSchema });
+const logTrendSchema: z.ZodType<LogTrend> = z
+  .object({
+    start: nonNegativeIntegerSchema,
+    end: nonNegativeIntegerSchema,
+    intervalMs: nonNegativeIntegerSchema.positive().refine(interval => logTrendIntervals.has(interval)),
+    buckets: z.array(
+      z
+        .object({
+          start: nonNegativeIntegerSchema,
+          count: nonNegativeIntegerSchema
+        })
+        .strict()
+    )
+  })
+  .strict()
+  .superRefine((trend, context) => {
+    if (trend.start > trend.end) {
+      context.addIssue({ code: 'custom', message: 'Trend start must not be after end' });
+    }
+    if (trend.buckets.length > 60) {
+      context.addIssue({ code: 'custom', message: 'Trend contains too many buckets' });
+    }
+    const firstBucketIndex = Math.floor(trend.start / trend.intervalMs);
+    const lastBucketIndex = Math.floor(trend.end / trend.intervalMs);
+    for (const [index, bucket] of trend.buckets.entries()) {
+      const previous = trend.buckets[index - 1];
+      const bucketIndex = Math.floor(bucket.start / trend.intervalMs);
+      if (
+        bucket.start % trend.intervalMs !== 0 ||
+        bucketIndex < firstBucketIndex ||
+        bucketIndex > lastBucketIndex ||
+        (previous != null && previous.start >= bucket.start)
+      ) {
+        context.addIssue({ code: 'custom', message: 'Trend bucket is invalid', path: ['buckets', index] });
+      }
+    }
+  });
 
 export function parseLogOverview(value: unknown): LogOverview {
   const result = logOverviewSchema.safeParse(value);

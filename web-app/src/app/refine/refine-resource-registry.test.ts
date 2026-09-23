@@ -43,12 +43,19 @@ describe('Refine shell resource registry', () => {
     expect(shellMeta('topology')).toMatchObject({ timePolicy: 'global' });
     expect(shellMeta('explore')).toMatchObject({ timePolicy: 'route_owned' });
     expect(shellMeta('instrumentation')).toMatchObject({ timePolicy: 'none' });
-    expect(shellMeta('alerts')).toMatchObject({ timePolicy: 'none' });
+    expect(shellMeta('alerts')).toMatchObject({
+      timePolicy: 'none',
+      actionTimePolicies: { show: 'route_owned' }
+    });
     expect(shellMeta('bulletin')).toMatchObject({ timePolicy: 'none' });
     expect(shellMeta('monitors')).toMatchObject({
       timePolicy: 'none'
     });
     expect(shellMeta('monitors')?.actionTimePolicies).toBeUndefined();
+    expect(shellMeta('entities')).toMatchObject({
+      timePolicy: 'none',
+      actionTimePolicies: { show: 'global' }
+    });
     expect(refineResources.find(resource => resource.name === 'monitors')).toMatchObject({
       create: '/monitors/new',
       edit: '/monitors/:monitorId/edit',
@@ -57,6 +64,10 @@ describe('Refine shell resource registry', () => {
     });
     expect(refineResources.find(resource => resource.name === 'alert-integrations')).toMatchObject({
       list: '/alerts/integrations/webhook'
+    });
+    expect(refineResources.find(resource => resource.name === 'alerts')).toMatchObject({
+      list: '/alerts',
+      show: '/alerts/:alertId/investigate'
     });
   });
 

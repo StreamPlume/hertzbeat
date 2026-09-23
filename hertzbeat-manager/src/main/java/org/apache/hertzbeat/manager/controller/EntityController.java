@@ -32,6 +32,7 @@ import org.apache.hertzbeat.manager.pojo.dto.EntityCatalogSuggestionsInfo;
 import org.apache.hertzbeat.common.entity.dto.Message;
 import org.apache.hertzbeat.common.entity.dto.PageResponse;
 import org.apache.hertzbeat.manager.pojo.dto.EntityDetailDto;
+import org.apache.hertzbeat.manager.pojo.dto.EntityApmRedView;
 import org.apache.hertzbeat.manager.pojo.dto.EntityDefinitionWorkspaceActivityInfo;
 import org.apache.hertzbeat.manager.pojo.dto.EntityDefinitionWorkspaceResumeInfo;
 import org.apache.hertzbeat.manager.pojo.dto.EntityDefinitionWorkspaceTemplateInfo;
@@ -43,6 +44,7 @@ import org.apache.hertzbeat.manager.pojo.dto.EntitySummaryInfo;
 import org.apache.hertzbeat.common.entity.alerter.SingleAlert;
 import org.apache.hertzbeat.common.observability.dto.entity.MonitorInfo;
 import org.apache.hertzbeat.manager.service.ObserveEntityService;
+import org.apache.hertzbeat.manager.service.entity.EntityApmRedReadModelService;
 import org.springframework.data.domain.Page;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -66,6 +68,9 @@ public class EntityController {
 
     @Autowired
     private ObserveEntityService observeEntityService;
+
+    @Autowired
+    private EntityApmRedReadModelService entityApmRedReadModelService;
 
     @PostMapping
     @Operation(summary = "Add a new entity", description = "Add a new entity")
@@ -177,6 +182,19 @@ public class EntityController {
             return ResponseEntity.ok(Message.fail(MONITOR_NOT_EXIST_CODE, "Entity not exist."));
         }
         return ResponseEntity.ok(Message.success(detail));
+    }
+
+    @GetMapping("/{id:\\d+}/signals/red")
+    @Operation(summary = "Get entity APM RED signal", description = "Query the bounded Greptime Flow RED signal")
+    public ResponseEntity<Message<EntityApmRedView>> getEntityApmRedSignal(
+            @Parameter(description = "Entity ID", example = "87584674384") @PathVariable("id") long id,
+            @Parameter(description = "Start epoch milliseconds") @RequestParam long start,
+            @Parameter(description = "End epoch milliseconds") @RequestParam long end) {
+        EntityApmRedView view = entityApmRedReadModelService.query(id, start, end);
+        if (view == null) {
+            return ResponseEntity.ok(Message.fail(MONITOR_NOT_EXIST_CODE, "Entity not exist."));
+        }
+        return ResponseEntity.ok(Message.success(view));
     }
 
     @GetMapping("/{id:\\d+}/alerts")

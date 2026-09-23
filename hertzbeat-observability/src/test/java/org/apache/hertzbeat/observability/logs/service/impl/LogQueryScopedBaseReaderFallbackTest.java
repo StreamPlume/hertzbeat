@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.stream.Stream;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrend;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.HistoryDataReader;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -41,6 +42,8 @@ class LogQueryScopedBaseReaderFallbackTest {
     private static final String WORKSPACE = "team-a";
     private static final String SERVICE = "checkout";
     private static final long LOG_TIME = 1_734_005_477_630_000_000L;
+    private static final long TREND_START_MS = Math.floorDiv(LOG_TIME / 1_000_000L, 60_000L) * 60_000L;
+    private static final long TREND_END_MS = TREND_START_MS + 30 * 60_000L;
 
     @ParameterizedTest(name = "{0} with {1}")
     @MethodSource("operationAndFilterCases")
@@ -120,12 +123,10 @@ class LogQueryScopedBaseReaderFallbackTest {
     }
 
     private static void assertTrend(LogQueryServiceImpl service, FilterCase filterCase) {
-        Map<String, Object> result = service.trendStats(WORKSPACE, null, null, null, null, null, null, null,
+        LogTrend result = service.trendStats(WORKSPACE, null, TREND_START_MS, TREND_END_MS, null, null, null, null,
                 null, SERVICE, null, null, filterCase.resourceFilter(), filterCase.attributeFilter(), false, false);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Long> hourly = (Map<String, Long>) result.get("hourlyStats");
-        assertThat(hourly.values()).containsExactly(1L);
+        assertThat(result.buckets()).extracting(bucket -> bucket.count()).containsExactly(1L);
     }
 
     private static void assertGroupBy(LogQueryServiceImpl service, FilterCase filterCase) {

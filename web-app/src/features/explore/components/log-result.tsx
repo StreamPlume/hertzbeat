@@ -35,7 +35,9 @@ export function LogResult({
   navigate,
   evidenceCurrent = true,
   live,
-  statistics
+  statistics,
+  onSelectLog,
+  onOpenTrace
 }: {
   data?: ExplorePageResult<LogRow> | undefined;
   query: LogExploreQuery;
@@ -44,6 +46,8 @@ export function LogResult({
   evidenceCurrent?: boolean | undefined;
   live?: LiveLogView | undefined;
   statistics?: Pick<LogHistoryEvidence, 'overview' | 'trend'> | undefined;
+  onSelectLog?: ((row: LogRow) => void) | undefined;
+  onOpenTrace?: ((row: LogRow) => void) | undefined;
 }) {
   if (query.live && live) return <LogStreamResult stream={live} query={query} t={t} navigate={navigate} />;
   if (query.live) return <Alert type="error" showIcon message={t('exploreLog.streamFailed')} />;
@@ -61,6 +65,8 @@ export function LogResult({
         t={t}
         navigate={navigate}
         evidenceCurrent={evidenceCurrent}
+        onSelectLog={onSelectLog}
+        onOpenTrace={onOpenTrace}
       />
     );
   return (
@@ -90,7 +96,10 @@ function LogStatistics({
           ['fatal', statistics.overview.data.fatalCount]
         ] as const)
       : [];
-  const trendRows = statistics.trend.kind === 'ready' ? Object.entries(statistics.trend.data.hourlyStats).sort() : [];
+  const trendRows =
+    statistics.trend.kind === 'ready'
+      ? statistics.trend.data.buckets.map(bucket => [String(bucket.start), bucket.count] as [string, number])
+      : [];
   return (
     <div className={styles.statistics}>
       <section aria-label={t('exploreLog.overview')}>

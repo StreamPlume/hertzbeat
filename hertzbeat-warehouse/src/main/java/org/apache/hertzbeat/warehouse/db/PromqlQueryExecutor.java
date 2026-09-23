@@ -189,6 +189,11 @@ public abstract class PromqlQueryExecutor implements QueryExecutor {
             } else {
                 throw new IllegalArgumentException(String.format("no such time type for query id %s.", datasourceQuery.getRefId()));
             }
+            if (datasourceQuery.getLimit() != null && datasourceQuery.getLimit() > 0) {
+                uri = UriComponentsBuilder.fromUri(uri)
+                        .queryParam(HTTP_LIMIT_PARAM, datasourceQuery.getLimit())
+                        .build().toUri();
+            }
             ResponseEntity<PromQlQueryContent> responseEntity = restTemplate.exchange(uri, HttpMethod.GET, httpEntity,
                     PromQlQueryContent.class);
             if (responseEntity.getStatusCode().is2xxSuccessful()) {

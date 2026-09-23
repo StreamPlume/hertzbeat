@@ -1,0 +1,97 @@
+/* Licensed to the Apache Software Foundation (ASF) under the Apache License, Version 2.0. */
+
+.pagination {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  overflow-x: auto;
+}
+
+.pagination :global(.ant-pagination) {
+  flex-wrap: nowrap;
+}
+
+.pagination :global(.ant-pagination-item),
+.pagination :global(.ant-pagination-prev),
+.pagination :global(.ant-pagination-next) {
+  min-width: 28px;
+  height: 28px;
+  line-height: 26px;
+}
+
+.pagination[data-pagination-variant='compact'] {
+  height: 28px;
+  align-items: center;
+  gap: 2px;
+  overflow: visible;
+}
+
+.pagination[data-pagination-variant='compact'] button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hb-text-secondary);
+  cursor: pointer;
+  place-items: center;
+}
+
+.pagination[data-pagination-variant='compact'] button:hover:not(:disabled) {
+  background: var(--hb-bg-hover);
+  color: var(--hb-text-primary);
+}
+
+.pagination[data-pagination-variant='compact'] button:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 1px;
+}
+
+.pagination[data-pagination-variant='compact'] button:disabled {
+  color: var(--hb-text-muted);
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.persesFrame {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.logResultBody {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.logRegion {
+  width: 100%;
+  min-width: 0;
+  padding-block: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.logRegion + .logRegion {
+  border-top: 1px solid var(--hb-border-subtle);
+}
+
+.logRegion[data-explore-log-region='query'] {
+  padding-block: 0;
+}
+
+.logRegion[data-explore-log-region='result'] {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+@media (width <= 700px) {
+  .logRegion[data-explore-log-region='result'] {
+    overflow: visible;
+  }
+}

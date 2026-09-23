@@ -17,7 +17,7 @@
 
 import { App } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { loadAlertSilence } from '../api/alert-silence-api';
@@ -81,8 +81,8 @@ export function useAlertSilenceDetailController(isBusy: () => boolean, isWriteLo
 function useAlertSilenceDraftActions(
   isBusy: () => boolean,
   isWriteLocked: () => boolean,
-  intent: RefObject<number>,
-  request: RefObject<AbortController | null>,
+  intent: MutableRefObject<number>,
+  request: MutableRefObject<AbortController | null>,
   setDetail: Dispatch<SetStateAction<AlertSilenceDetailState>>,
   close: () => void
 ) {
@@ -112,7 +112,7 @@ function replaceReadyDraft(
   return current.kind === 'ready' ? { ...current, draft: replace(current.draft) } : current;
 }
 
-function retireDetail(intent: RefObject<number>, request: RefObject<AbortController | null>) {
+function retireDetail(intent: MutableRefObject<number>, request: MutableRefObject<AbortController | null>) {
   intent.current += 1;
   request.current?.abort();
   request.current = null;

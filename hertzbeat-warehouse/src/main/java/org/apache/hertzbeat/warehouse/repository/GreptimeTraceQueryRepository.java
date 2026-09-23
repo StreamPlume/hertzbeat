@@ -20,6 +20,7 @@
 package org.apache.hertzbeat.warehouse.repository;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -28,6 +29,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.warehouse.constants.WarehouseConstants;
@@ -35,6 +37,7 @@ import org.apache.hertzbeat.warehouse.db.GreptimeSqlQueryExecutor;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.greptime.GreptimeProperties;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.greptime.GreptimeSqlQueryContent;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -59,19 +62,44 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
     private static final String TRACE_SELECT_COLUMNS = "*";
     private static final String SELF_TELEMETRY_SERVICE_FILTER =
             "LOWER(service_name) NOT IN ('hertzbeat', 'apache-hertzbeat')";
-    private static final String RESOURCE_ATTRIBUTES_COLUMN = "resource_attributes";
+    private static final List<String> TRACE_LIST_RESOURCE_ATTRIBUTE_KEYS = List.of(
+            "hertzbeat.workspace_id",
+            "hertzbeat.entity_id",
+            "hertzbeat.entity_type",
+            "service.namespace",
+            "service.instance.id",
+            "deployment.environment.name",
+            "hertzbeat.collector.id");
+    private static final Set<String> STABLE_RESOURCE_ATTRIBUTE_KEYS = Set.copyOf(TRACE_LIST_RESOURCE_ATTRIBUTE_KEYS);
+    private static final int MAX_DISCOVERED_DYNAMIC_ATTRIBUTE_COLUMNS = 4_096;
+    private static final long DYNAMIC_ATTRIBUTE_SCHEMA_REFRESH_NANOS = Duration.ofSeconds(30).toNanos();
     private final ObjectProvider<GreptimeSqlQueryExecutor> greptimeSqlQueryExecutorProvider;
     private final GreptimeProperties greptimeProperties;
     private final RestTemplate restTemplate;
-    private volatile Set<String> traceTableColumns;
+    private final LongSupplier monotonicNanos;
+    private final long dynamicAttributeSchemaRefreshNanos;
+    private volatile DynamicAttributeSchemaSnapshot dynamicAttributeSchemaSnapshot;
 
+    @Autowired
     public GreptimeTraceQueryRepository(
             ObjectProvider<GreptimeSqlQueryExecutor> greptimeSqlQueryExecutorProvider,
             GreptimeProperties greptimeProperties,
             @Qualifier(WarehouseConstants.GREPTIME_QUERY_REST_TEMPLATE) RestTemplate restTemplate) {
+        this(greptimeSqlQueryExecutorProvider, greptimeProperties, restTemplate,
+                System::nanoTime, DYNAMIC_ATTRIBUTE_SCHEMA_REFRESH_NANOS);
+    }
+
+    GreptimeTraceQueryRepository(
+            ObjectProvider<GreptimeSqlQueryExecutor> greptimeSqlQueryExecutorProvider,
+            GreptimeProperties greptimeProperties,
+            RestTemplate restTemplate,
+            LongSupplier monotonicNanos,
+            long dynamicAttributeSchemaRefreshNanos) {
         this.greptimeSqlQueryExecutorProvider = greptimeSqlQueryExecutorProvider;
         this.greptimeProperties = greptimeProperties;
         this.restTemplate = restTemplate;
+        this.monotonicNanos = monotonicNanos;
+        this.dynamicAttributeSchemaRefreshNanos = Math.max(1L, dynamicAttributeSchemaRefreshNanos);
     }
 
     @Override
@@ -191,32 +219,12 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
                                                         String spanScope,
                                                         int offset,
                                                         int limit) {
-        String errorExpression = "SUM(CASE WHEN span_status_code IN ('STATUS_CODE_ERROR', 'ERROR') "
+        if (!StringUtils.hasText(workspaceId)) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        String candidateErrorExpression = "SUM(CASE WHEN span_status_code IN ('STATUS_CODE_ERROR', 'ERROR') "
                 + "THEN 1 ELSE 0 END)";
-        String serviceNamespaceExpression = resourceAttributeExpression(null, "service.namespace");
-        String serviceNamespaceProjection = StringUtils.hasText(serviceNamespaceExpression)
-                ? "MAX(" + serviceNamespaceExpression + ")"
-                : "NULL";
-        String resourceAttributesProjection = traceTableColumns().contains(RESOURCE_ATTRIBUTES_COLUMN)
-                ? "MAX(" + RESOURCE_ATTRIBUTES_COLUMN + ")"
-                : "NULL";
-        StringBuilder innerSql = new StringBuilder("SELECT ")
-                .append("trace_id, ")
-                .append("MAX(span_id) AS root_span_id, ")
-                .append("MAX(service_name) AS service_name, ")
-                .append(serviceNamespaceProjection)
-                .append(" AS service_namespace, ")
-                .append("MAX(span_name) AS root_span_name, ")
-                .append("MAX(duration_nano) AS duration_nano, ")
-                .append("CASE WHEN ")
-                .append(errorExpression)
-                .append(" > 0 THEN 'ERROR' ELSE 'OK' END AS span_status_code, ")
-                .append("MIN(timestamp) AS timestamp, ")
-                .append(errorExpression)
-                .append(" AS error_span_count, ")
-                .append(resourceAttributesProjection)
-                .append(" AS resource_attributes ")
-                .append("FROM ")
+        StringBuilder candidateSql = new StringBuilder("SELECT trace_id, MIN(timestamp) AS match_timestamp FROM ")
                 .append(TRACE_TABLE);
         List<String> filters = new LinkedList<>();
         if (start != null) {
@@ -250,19 +258,53 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
         if (Boolean.TRUE.equals(hideInternal)) {
             filters.add(SELF_TELEMETRY_SERVICE_FILTER);
         }
+        filters.add("trace_id IS NOT NULL AND trace_id != ''");
         if (!filters.isEmpty()) {
-            innerSql.append(" WHERE ").append(String.join(" AND ", filters));
+            candidateSql.append(" WHERE ").append(String.join(" AND ", filters));
         }
-        innerSql.append(" GROUP BY trace_id");
+        candidateSql.append(" GROUP BY trace_id");
         if (Boolean.TRUE.equals(errorOnly)) {
-            innerSql.append(" HAVING ").append(errorExpression).append(" > 0");
+            candidateSql.append(" HAVING ").append(candidateErrorExpression).append(" > 0");
         }
-        String sql = "SELECT *, COUNT(*) OVER () AS total_count FROM ("
-                + innerSql
-                + ") trace_list ORDER BY timestamp DESC LIMIT "
+        String rootPredicate = "(stats.parent_span_id IS NULL OR stats.parent_span_id = '')";
+        String errorFlag = "CASE WHEN stats.span_status_code IN ('STATUS_CODE_ERROR', 'ERROR') "
+                + "THEN 1 ELSE 0 END";
+        String fullErrorCount = "SUM(SUM(" + errorFlag + ")) OVER (PARTITION BY page.trace_id)";
+        String rootServiceNamespace = resourceAttributeExpression("stats", "service.namespace");
+        String statsWorkspaceFilter = workspaceFilter("stats", workspaceId);
+        if (!StringUtils.hasText(statsWorkspaceFilter)) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        String sql = "WITH candidate_traces AS ("
+                + candidateSql
+                + "), paged_traces AS (SELECT trace_id, match_timestamp, "
+                + "COUNT(*) OVER () AS total_count FROM candidate_traces ORDER BY match_timestamp DESC LIMIT "
                 + Math.max(limit, 1)
                 + " OFFSET "
-                + Math.max(offset, 0);
+                + Math.max(offset, 0)
+                + ") SELECT page.trace_id, "
+                + "MAX(CASE WHEN " + rootPredicate + " THEN stats.span_id ELSE NULL END) AS root_span_id, "
+                + "MAX(CASE WHEN " + rootPredicate + " THEN stats.service_name ELSE NULL END) AS service_name, "
+                + "MAX(CASE WHEN " + rootPredicate + " THEN " + rootServiceNamespace
+                + " ELSE NULL END) AS service_namespace, "
+                + "MAX(CASE WHEN " + rootPredicate + " THEN stats.span_name ELSE NULL END) AS root_span_name, "
+                + "MAX(CASE WHEN " + rootPredicate + " THEN stats.duration_nano ELSE NULL END) AS duration_nano, "
+                + "CASE WHEN " + fullErrorCount
+                + " > 0 THEN 'ERROR' ELSE 'OK' END AS span_status_code, "
+                + "MAX(CASE WHEN " + rootPredicate + " THEN stats.timestamp ELSE NULL END) AS timestamp, "
+                + fullErrorCount + " AS error_span_count, "
+                + "SUM(COUNT(*)) OVER (PARTITION BY page.trace_id) AS span_count, "
+                + "SUM(SUM(CASE WHEN " + rootPredicate + " THEN 1 ELSE 0 END)) "
+                + "OVER (PARTITION BY page.trace_id) AS root_span_count, "
+                + "stats.service_name AS stats_service_name, "
+                + "COUNT(*) AS service_span_count, "
+                + "SUM(" + errorFlag + ") AS service_error_span_count, "
+                + traceRootResourceAttributeProjections(rootPredicate) + ", "
+                + "page.total_count, COUNT(*) OVER () AS service_row_count FROM paged_traces page JOIN " + TRACE_TABLE
+                + " stats ON stats.trace_id = page.trace_id AND " + statsWorkspaceFilter
+                + " GROUP BY page.trace_id, page.match_timestamp, page.total_count, stats.service_name"
+                + " ORDER BY page.match_timestamp DESC, page.trace_id, stats.service_name LIMIT "
+                + (TraceQueryRepository.MAX_TRACE_LIST_SERVICE_ROWS + 1);
         return queryRows(sql);
     }
 
@@ -912,17 +954,13 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
         String expression = spanAttributeExpression(key);
         return StringUtils.hasText(expression)
                 ? expression + " = '" + escapeSql(value.trim()) + "'"
-                : null;
+                : "1 = 0";
     }
 
     private String spanAttributeExpression(String key) {
-        Set<String> columns = traceTableColumns();
         String normalizedKey = key.trim();
-        String flattenedColumn = "span_attributes." + normalizedKey;
-        if (columns.contains(flattenedColumn)) {
-            return qualifiedColumn(null, flattenedColumn);
-        }
-        return "json_get_string(span_attributes, '$[\"" + escapeJsonPathKey(normalizedKey) + "\"]')";
+        String column = "span_attributes." + normalizedKey;
+        return dynamicAttributeColumnExists(column) ? qualifiedColumn(null, column) : null;
     }
 
     private List<Map<String, Object>> queryRows(String sql) {
@@ -1040,18 +1078,7 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
     private String workspaceFilter(String alias, String workspaceId) {
         String normalizedWorkspaceId = workspaceId.trim();
         String canonicalWorkspace = resourceAttributeExpression(alias, "hertzbeat.workspace_id");
-        if (!StringUtils.hasText(canonicalWorkspace)) {
-            throw new TelemetryStorageUnavailableException();
-        }
-        String hertzbeatWorkspaceFilter = canonicalWorkspace + " = '"
-                + escapeSql(normalizedWorkspaceId) + "'";
-        String legacyWorkspace = resourceAttributeExpression(alias, "workspace.id");
-        if (!StringUtils.hasText(legacyWorkspace)) {
-            return hertzbeatWorkspaceFilter;
-        }
-        String workspaceIdFilter = legacyWorkspace + " = '" + escapeSql(normalizedWorkspaceId) + "'";
-        String canonicalMissing = "(" + canonicalWorkspace + " IS NULL OR " + canonicalWorkspace + " = '')";
-        return "(" + hertzbeatWorkspaceFilter + " OR (" + canonicalMissing + " AND " + workspaceIdFilter + "))";
+        return canonicalWorkspace + " = '" + escapeSql(normalizedWorkspaceId) + "'";
     }
 
     private String resourceAttributeAnyFilter(String alias, String key, Collection<String> values) {
@@ -1213,24 +1240,17 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
     private String resourceAttributeFilter(String alias, String key, String value) {
         String expression = resourceAttributeExpression(alias, key);
         if (!StringUtils.hasText(expression)) {
-            return null;
+            return "1 = 0";
         }
         return expression + " = '"
                 + escapeSql(value.trim()) + "'";
     }
 
     private String resourceAttributeExpression(String alias, String key) {
-        Set<String> columns = traceTableColumns();
         String normalizedKey = key.trim();
-        String flattenedColumn = RESOURCE_ATTRIBUTES_COLUMN + "." + normalizedKey;
-        if (columns.contains(flattenedColumn)) {
-            return qualifiedColumn(alias, flattenedColumn);
-        }
-        if (columns.contains(RESOURCE_ATTRIBUTES_COLUMN)) {
-            String column = StringUtils.hasText(alias)
-                    ? alias + "." + RESOURCE_ATTRIBUTES_COLUMN
-                    : RESOURCE_ATTRIBUTES_COLUMN;
-            return "json_get_string(" + column + ", '$[\"" + escapeJsonPathKey(normalizedKey) + "\"]')";
+        String column = "resource_attributes." + normalizedKey;
+        if (STABLE_RESOURCE_ATTRIBUTE_KEYS.contains(normalizedKey) || dynamicAttributeColumnExists(column)) {
+            return qualifiedColumn(alias, column);
         }
         return null;
     }
@@ -1244,35 +1264,91 @@ public class GreptimeTraceQueryRepository implements TraceQueryRepository {
         return "\"" + column.replace("\"", "\"\"") + "\"";
     }
 
-    private Set<String> traceTableColumns() {
-        Set<String> cachedColumns = traceTableColumns;
-        if (cachedColumns != null) {
-            return cachedColumns;
+    private String traceRootResourceAttributeProjections(String rootPredicate) {
+        return TRACE_LIST_RESOURCE_ATTRIBUTE_KEYS.stream()
+                .map(key -> {
+                    String column = resourceAttributeExpression("stats", key);
+                    return "MAX(CASE WHEN " + rootPredicate + " THEN " + column + " ELSE NULL END) AS "
+                            + quoteIdentifier("resource_attributes." + key);
+                })
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    /**
+     * Discovers schema-less long-tail columns with a hard result bound. This is not a
+     * version-compatibility probe: stable HertzBeat dimensions never depend on it. Missing columns
+     * trigger a throttled refresh so native pipeline schema evolution becomes visible without
+     * allowing concurrent or repeated user queries to issue an unbounded number of DESC requests.
+     */
+    private boolean dynamicAttributeColumnExists(String column) {
+        DynamicAttributeSchemaSnapshot snapshot = dynamicAttributeSchemaSnapshot;
+        if (snapshot != null && snapshot.columns().contains(column)) {
+            return true;
         }
-        Set<String> discoveredColumns = new LinkedHashSet<>();
-        for (Map<String, Object> row : queryRows("DESC " + TRACE_TABLE)) {
-            String column = readText(row, "Column");
-            if (StringUtils.hasText(column)) {
-                discoveredColumns.add(column);
+        long now = monotonicNanos.getAsLong();
+        if (snapshot == null || refreshDue(snapshot, now)) {
+            snapshot = refreshDynamicAttributeColumns(now);
+        }
+        if (!snapshot.available()) {
+            throw new TelemetryStorageUnavailableException();
+        }
+        return snapshot.columns().contains(column);
+    }
+
+    private boolean refreshDue(DynamicAttributeSchemaSnapshot snapshot, long now) {
+        return now - snapshot.refreshedAtNanos() >= dynamicAttributeSchemaRefreshNanos;
+    }
+
+    private DynamicAttributeSchemaSnapshot refreshDynamicAttributeColumns(long requestedAtNanos) {
+        DynamicAttributeSchemaSnapshot cached = dynamicAttributeSchemaSnapshot;
+        if (cached != null && !refreshDue(cached, requestedAtNanos)) {
+            return cached;
+        }
+        synchronized (this) {
+            cached = dynamicAttributeSchemaSnapshot;
+            long refreshedAtNanos = monotonicNanos.getAsLong();
+            if (cached != null && !refreshDue(cached, refreshedAtNanos)) {
+                return cached;
+            }
+            try {
+                Set<String> discovered = new LinkedHashSet<>();
+                for (Map<String, Object> row : queryRows("DESC " + TRACE_TABLE)) {
+                    if (discovered.size() >= MAX_DISCOVERED_DYNAMIC_ATTRIBUTE_COLUMNS) {
+                        break;
+                    }
+                    String column = discoveredColumnName(row);
+                    if (StringUtils.hasText(column)
+                            && (column.startsWith("resource_attributes.") || column.startsWith("span_attributes."))) {
+                        discovered.add(column);
+                    }
+                }
+                cached = new DynamicAttributeSchemaSnapshot(
+                        Collections.unmodifiableSet(discovered), refreshedAtNanos, true);
+                dynamicAttributeSchemaSnapshot = cached;
+                return cached;
+            } catch (TelemetryStorageUnavailableException ex) {
+                Set<String> staleColumns = cached == null ? Collections.emptySet() : cached.columns();
+                dynamicAttributeSchemaSnapshot = new DynamicAttributeSchemaSnapshot(
+                        staleColumns, refreshedAtNanos, false);
+                throw ex;
             }
         }
-        if (discoveredColumns.isEmpty()) {
-            discoveredColumns.add(RESOURCE_ATTRIBUTES_COLUMN);
-        }
-        Set<String> immutableColumns = Collections.unmodifiableSet(discoveredColumns);
-        traceTableColumns = immutableColumns;
-        return immutableColumns;
     }
 
-    private String readText(Map<String, Object> row, String key) {
-        if (row == null || !row.containsKey(key)) {
+    private String discoveredColumnName(Map<String, Object> row) {
+        if (CollectionUtils.isEmpty(row)) {
             return null;
         }
-        String value = String.valueOf(row.get(key)).trim();
-        return StringUtils.hasText(value) ? value : null;
+        for (Map.Entry<String, Object> entry : row.entrySet()) {
+            if (("column".equalsIgnoreCase(entry.getKey()) || "column_name".equalsIgnoreCase(entry.getKey()))
+                    && entry.getValue() != null) {
+                return String.valueOf(entry.getValue()).trim();
+            }
+        }
+        return null;
     }
 
-    private String escapeJsonPathKey(String key) {
-        return key.replace("\\", "\\\\").replace("\"", "\\\"");
+    private record DynamicAttributeSchemaSnapshot(Set<String> columns, long refreshedAtNanos, boolean available) {
     }
+
 }

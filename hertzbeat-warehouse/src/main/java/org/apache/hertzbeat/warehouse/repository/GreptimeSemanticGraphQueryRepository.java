@@ -34,6 +34,7 @@ import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hertzbeat.warehouse.db.GreptimeSqlQueryExecutor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -59,6 +60,7 @@ public class GreptimeSemanticGraphQueryRepository implements SemanticGraphQueryR
     private final Object capabilityLock = new Object();
     private volatile CapabilityState capabilityState = CapabilityState.unchecked();
 
+    @Autowired
     public GreptimeSemanticGraphQueryRepository(ObjectProvider<GreptimeSqlQueryExecutor> executorProvider) {
         this(executorProvider, Clock.systemUTC(), DEFAULT_CAPABILITY_TTL);
     }

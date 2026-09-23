@@ -25,8 +25,38 @@ import type { MetricConsole } from '../model/explore-signal-contract';
 import { metricSeries, type MetricResultState } from '../model/explore-signal-model';
 import { MetricResult } from './metric-result';
 
+const persesRuntime = vi.hoisted(() => ({ failed: false }));
+
+vi.mock('@/platform/perses', () => ({
+  HertzBeatMetricTimeSeriesResult: ({
+    ariaLabel,
+    className,
+    messages,
+    outcome
+  }: {
+    ariaLabel: string;
+    className?: string;
+    messages: { runtimeError: string };
+    outcome: { data: { series: Array<{ key: string }> } };
+  }) => {
+    if (persesRuntime.failed) return <div role="status">{messages.runtimeError}</div>;
+    return (
+      <div
+        role="img"
+        aria-label={ariaLabel}
+        className={className}
+        data-visualization-runtime="perses"
+        data-series-count={outcome.data.series.length}
+      />
+    );
+  }
+}));
+
 describe('MetricResult', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    persesRuntime.failed = false;
+  });
 
   beforeAll(async () => {
     Object.defineProperty(globalThis, 'ResizeObserver', { value: ResizeObserverStub, configurable: true });
@@ -41,9 +71,9 @@ describe('MetricResult', () => {
       </I18nextProvider>
     );
     expect(screen.getByRole('heading', { name: 'Metrics' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Metric trend' })).toHaveAttribute('viewBox', '0 0 1000 220');
-    expect(screen.getByRole('img', { name: 'Metric trend' })).toHaveAttribute('preserveAspectRatio', 'none');
-    expect(screen.getByText('http.server.duration · checkout')).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('explore.samples'))).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Metric trend' })).toHaveAttribute('data-visualization-runtime', 'perses');
+    expect(screen.getByRole('img', { name: 'Metric trend' })).toHaveAttribute('data-series-count', '1');
     expect(screen.getByText('125 ms')).toBeInTheDocument();
     expect(screen.getAllByText('method=POST')).toHaveLength(2);
     expect(screen.queryByText('__name__=http.server.duration')).not.toBeInTheDocument();
@@ -74,7 +104,7 @@ describe('MetricResult', () => {
     expect(screen.queryByText('No metric series for this context.')).not.toBeInTheDocument();
   });
 
-  it('limits the trend to six consistently colored series', () => {
+  it('passes every authorized series to the Perses runtime', () => {
     const series = Array.from({ length: 7 }, (_, index) => ({
       key: `series-${index}`,
       name: `series-${index}`,
@@ -88,10 +118,21 @@ describe('MetricResult', () => {
     );
 
     const trend = screen.getByRole('img', { name: 'Metric trend' });
-    expect(trend.querySelectorAll('path')).toHaveLength(6);
-    expect(trend.previousElementSibling).toHaveTextContent('series-5');
-    expect(trend.previousElementSibling).not.toHaveTextContent('series-6');
+    expect(trend).toHaveAttribute('data-series-count', '7');
     expect(screen.getByText('series-6')).toBeInTheDocument();
+  });
+
+  it('keeps sample evidence visible when the Perses runtime fails', () => {
+    persesRuntime.failed = true;
+    render(
+      <I18nextProvider i18n={i18n}>
+        <Subject data={metricData} state={{ kind: 'ready', series: metricSeries(metricData) }} />
+      </I18nextProvider>
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('explore.perses.runtimeError'));
+    expect(screen.getByText('125 ms')).toBeInTheDocument();
+    expect(screen.getAllByText('method=POST')).toHaveLength(2);
   });
 
   it('shows only the latest one hundred samples in reverse order', () => {
@@ -158,7 +199,17 @@ function Subject({
   retry?: () => Promise<void>;
 }) {
   const { t } = useTranslation();
-  return <MetricResult data={data} state={state} retry={retry} t={t} />;
+  return (
+    <MetricResult
+      data={data}
+      state={state}
+      retry={retry}
+      t={t}
+      query={{ signal: 'metrics', timeRange: 'last-30m', query: 'http.server.duration' }}
+      timeWindow={{ from: 1_750_000_000_000, to: 1_750_000_060_000 }}
+      revision={0}
+    />
+  );
 }
 
 const metricData: MetricConsole = {

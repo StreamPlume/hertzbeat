@@ -30,8 +30,8 @@ export type OrgWriteContext = {
   command: ExclusiveOperation;
   notify: StatusManagementNotifications;
   queryClient: QueryClient;
-  recovery: React.RefObject<OrgWriteRecovery | undefined>;
-  proofPending: React.RefObject<boolean>;
+  recovery: React.MutableRefObject<OrgWriteRecovery | undefined>;
+  proofPending: React.MutableRefObject<boolean>;
   setSaving: (value: boolean) => void;
   setWriteRecovery: (value: OrgWriteRecovery['stage'] | undefined) => void;
 };

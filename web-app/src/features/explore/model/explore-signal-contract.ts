@@ -21,7 +21,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export const LIVE_LOG_RETENTION_LIMIT = 500;
 export type ExplorePageResult<T> = PagedCollection<T>;
 
-export type TraceRow = {
+type TraceSummary = {
   traceId: string;
   rootSpanId: string | null;
   serviceName: string | null;
@@ -33,52 +33,12 @@ export type TraceRow = {
   errorSpanCount: number;
   resourceAttributes: Record<string, string> | null;
 };
-export type TraceEvent = {
-  timeUnixNano: number | null;
-  name: string | null;
-  attributes: Record<string, JsonValue> | null;
-  droppedAttributesCount: number | null;
+export type TraceRow = TraceSummary & {
+  spanCount: number | null;
+  serviceStats: Record<string, { spanCount: number; errorCount: number }> | null;
 };
-export type TraceLink = {
-  traceId: string | null;
-  spanId: string | null;
-  traceState: string | null;
-  attributes: Record<string, JsonValue> | null;
-  droppedAttributesCount: number | null;
-};
-export type CodeNavigationHint = {
-  repositoryUrl: string | null;
-  provider: string | null;
-  defaultPath: string | null;
-  searchQuery: string | null;
-  label: string | null;
-};
-export type TraceSpan = {
-  traceId: string | null;
-  spanId: string | null;
-  parentSpanId: string | null;
-  spanName: string | null;
-  serviceName: string | null;
-  status: string | null;
-  spanKind: string | null;
-  statusMessage: string | null;
-  traceState: string | null;
-  scopeName: string | null;
-  scopeVersion: string | null;
-  durationNanos: number | null;
-  startTime: number | null;
-  highlighted: boolean;
-  resourceAttributes: Record<string, string> | null;
-  spanAttributes: Record<string, string> | null;
-  events: TraceEvent[] | null;
-  links: TraceLink[] | null;
-  codeNavigationHint: CodeNavigationHint | null;
-};
-export type TraceDetail = TraceRow & { spans: TraceSpan[] | null };
 
-export type LogRow = {
-  timeUnixNano: number | null;
-  observedTimeUnixNano: number | null;
+type SharedLogRow = {
   severityNumber: number | null;
   severityText: string | null;
   body: JsonValue;
@@ -97,6 +57,15 @@ export type LogRow = {
   } | null;
   scopeSchemaUrl: string | null;
 };
+export type LogRow = SharedLogRow & {
+  logRecordUid: string | null;
+  timeUnixNano: string | null;
+  observedTimeUnixNano: string | null;
+};
+export type LiveLogRow = SharedLogRow & {
+  timeUnixNano: number | null;
+  observedTimeUnixNano: number | null;
+};
 export type LogStreamGap = {
   observedAt: number;
   reason: 'queue_overflow';
@@ -111,20 +80,25 @@ export type LogOverview = {
   errorCount: number;
   fatalCount: number;
 };
-export type LogTrend = { hourlyStats: Record<string, number> };
-export type LogStatisticEvidence<T> = { kind: 'ready'; data: T } | { kind: 'error' };
+export type LogTrend = {
+  start: number;
+  end: number;
+  intervalMs: number;
+  buckets: Array<{ start: number; count: number }>;
+};
+type LogStatisticEvidence<T> = { kind: 'ready'; data: T } | { kind: 'error' };
 export type LogHistoryEvidence = {
   page: ExplorePageResult<LogRow>;
   overview: LogStatisticEvidence<LogOverview>;
   trend: LogStatisticEvidence<LogTrend>;
 };
 
-export type MetricField = {
+type MetricField = {
   name: string | null;
   type: 'number' | 'string' | 'time' | 'bool' | null;
   unit: string | null;
 };
-export type MetricFrame = {
+type MetricFrame = {
   schema: {
     fields: MetricField[] | null;
     labels: Record<string, string> | null;
@@ -152,6 +126,11 @@ export type MetricConsole = {
   emptyStateReason: string | null;
   errorMessage: string | null;
 };
+export type MetricSignalEvidence = MetricConsole | { kind: 'inventory_empty' };
+
+export function isMetricConsole(evidence: MetricSignalEvidence): evidence is MetricConsole {
+  return !('kind' in evidence);
+}
 
 export class ExploreSignalContractError extends Error {
   constructor(message = 'Explore signal response does not match its contract') {
@@ -163,5 +142,11 @@ export class ExploreSignalMissingError extends Error {
   constructor() {
     super('Explore signal detail is missing');
     this.name = 'ExploreSignalMissingError';
+  }
+}
+export class ExploreSignalUnavailableError extends Error {
+  constructor() {
+    super('Explore signal evidence is unavailable');
+    this.name = 'ExploreSignalUnavailableError';
   }
 }

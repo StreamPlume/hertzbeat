@@ -15,10 +15,10 @@
  * limitations under the License.
  */
 
-import type { LogRow } from '../model/explore-signal-contract';
+import type { LiveLogRow, LogRow } from '../model/explore-signal-contract';
 import { logTimestampMs } from '../model/explore-signal-model';
 
-export function formatLogTime(row: LogRow) {
+export function formatLogTime(row: LogRow | LiveLogRow) {
   const timestamp = logTimestampMs(row);
   return timestamp == null ? '—' : new Date(timestamp).toLocaleString();
 }

@@ -17,10 +17,6 @@
 
 package org.apache.hertzbeat.observability.logs.service.impl;
 
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -43,6 +39,8 @@ import org.apache.hertzbeat.common.entity.log.LogEntry;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenRequestContext;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenScopes;
 import org.apache.hertzbeat.common.observability.gateway.ObservabilityWorkspaceQueryGateway;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrend;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.observability.ingestion.semantic.OtlpResourceSemanticAttributes;
 import org.apache.hertzbeat.observability.logs.query.LogVisibilityFilter;
@@ -413,20 +411,20 @@ public class LogQueryServiceImpl implements LogQueryService {
     }
 
     @Override
-    public Map<String, Object> trendStats(Long start, Long end, String traceId, String spanId,
-                                          Integer severityNumber, String severityText, String search,
-                                          String serviceName, String serviceNamespace, String environment,
-                                          boolean hideInternal, boolean hideNoise) {
+    public LogTrend trendStats(Long start, Long end, String traceId, String spanId,
+                               Integer severityNumber, String severityText, String search,
+                               String serviceName, String serviceNamespace, String environment,
+                               boolean hideInternal, boolean hideNoise) {
         return trendStats(start, end, traceId, spanId, severityNumber, severityText, search,
                 serviceName, serviceNamespace, environment, null, null, hideInternal, hideNoise);
     }
 
     @Override
-    public Map<String, Object> trendStats(Long start, Long end, String traceId, String spanId,
-                                          Integer severityNumber, String severityText, String search,
-                                          String serviceName, String serviceNamespace, String environment,
-                                          String resourceFilter, String attributeFilter,
-                                          boolean hideInternal, boolean hideNoise) {
+    public LogTrend trendStats(Long start, Long end, String traceId, String spanId,
+                               Integer severityNumber, String severityText, String search,
+                               String serviceName, String serviceNamespace, String environment,
+                               String resourceFilter, String attributeFilter,
+                               boolean hideInternal, boolean hideNoise) {
         String workspaceId = capturedWorkspaceId();
         Map<String, String> resourceFilters = StringUtils.hasText(workspaceId)
                 ? parseScopedFilter(resourceFilter) : parseLogAttributeFilter(resourceFilter, true);
@@ -438,11 +436,11 @@ public class LogQueryServiceImpl implements LogQueryService {
     }
 
     @Override
-    public Map<String, Object> trendStats(Long entityId, Long start, Long end, String traceId, String spanId,
-                                          Integer severityNumber, String severityText, String search,
-                                          String serviceName, String serviceNamespace, String environment,
-                                          String resourceFilter, String attributeFilter,
-                                          boolean hideInternal, boolean hideNoise) {
+    public LogTrend trendStats(Long entityId, Long start, Long end, String traceId, String spanId,
+                               Integer severityNumber, String severityText, String search,
+                               String serviceName, String serviceNamespace, String environment,
+                               String resourceFilter, String attributeFilter,
+                               boolean hideInternal, boolean hideNoise) {
         String workspaceId = capturedWorkspaceId();
         if (StringUtils.hasText(workspaceId)) {
             return trendStats(workspaceId, entityId, start, end, traceId, spanId, severityNumber, severityText,
@@ -459,18 +457,19 @@ public class LogQueryServiceImpl implements LogQueryService {
     }
 
     @Override
-    public Map<String, Object> trendStats(String workspaceId, Long entityId, Long start, Long end, String traceId,
-                                          String spanId, Integer severityNumber, String severityText, String search,
-                                          String serviceName, String serviceNamespace, String environment,
-                                          String resourceFilter, String attributeFilter,
-                                          boolean hideInternal, boolean hideNoise) {
+    public LogTrend trendStats(String workspaceId, Long entityId, Long start, Long end, String traceId,
+                               String spanId, Integer severityNumber, String severityText, String search,
+                               String serviceName, String serviceNamespace, String environment,
+                               String resourceFilter, String attributeFilter,
+                               boolean hideInternal, boolean hideNoise) {
         String scope = requiredWorkspaceId(workspaceId);
         Map<String, String> resourceFilters = parseScopedFilter(resourceFilter);
         Map<String, String> attributeFilters = parseScopedFilter(attributeFilter);
         Optional<LogServiceContext> context = resolveWorkspaceEntityContext(
                 scope, entityId, serviceName, serviceNamespace, environment);
         if (context.isEmpty()) {
-            return Map.of();
+            TrendWindow window = resolveTrendWindow(start, end);
+            return new LogTrend(window.start(), window.end(), window.intervalMs(), List.of());
         }
         return trendStatsWithFilters(scope, start, end, traceId, spanId, severityNumber, severityText, search,
                 context.get().serviceName(), context.get().serviceNamespace(), context.get().environment(),
@@ -478,44 +477,39 @@ public class LogQueryServiceImpl implements LogQueryService {
                 hideInternal, hideNoise);
     }
 
-    private Map<String, Object> trendStatsWithFilters(String workspaceId, Long start, Long end,
-                                                      String traceId, String spanId,
-                                                      Integer severityNumber, String severityText, String search,
-                                                      String serviceName, String serviceNamespace, String environment,
-                                                      Map<String, String> resourceFilters,
-                                                      Map<String, String> attributeFilters,
-                                                      boolean hideInternal, boolean hideNoise) {
-        Map<String, Long> aggregate = null;
+    private LogTrend trendStatsWithFilters(String workspaceId, Long start, Long end,
+                                           String traceId, String spanId,
+                                           Integer severityNumber, String severityText, String search,
+                                           String serviceName, String serviceNamespace, String environment,
+                                           Map<String, String> resourceFilters,
+                                           Map<String, String> attributeFilters,
+                                           boolean hideInternal, boolean hideNoise) {
+        TrendWindow window = resolveTrendWindow(start, end);
+        List<LogTrendBucket> aggregate = null;
         if (!hasComplexAttributeFilters(resourceFilters, attributeFilters)) {
-            aggregate = readHourlyStats(workspaceId, start, end, traceId, spanId, severityNumber,
+            aggregate = readIntervalStats(workspaceId, window, traceId, spanId, severityNumber,
                     severityText, search, serviceName, serviceNamespace, environment, resourceFilters, attributeFilters,
                     hideInternal, hideNoise);
         }
         if (aggregate != null) {
-            Map<String, Object> result = new HashMap<>();
-            result.put("hourlyStats", aggregate);
-            return result;
+            return new LogTrend(window.start(), window.end(), window.intervalMs(), aggregate);
         }
 
-        List<LogEntry> logs = getFilteredLogs(workspaceId, start, end, traceId, spanId,
+        List<LogEntry> logs = getFilteredLogs(workspaceId, window.start(), window.end(), traceId, spanId,
                 severityNumber, severityText, search,
                 serviceName, serviceNamespace, environment, resourceFilters, attributeFilters, hideInternal, hideNoise);
 
-        Map<String, Long> hourlyStats = logs.stream()
+        List<LogTrendBucket> buckets = logs.stream()
                 .filter(log -> log.getTimeUnixNano() != null)
                 .collect(Collectors.groupingBy(
-                        log -> {
-                            long timestampMs = log.getTimeUnixNano() / 1_000_000L;
-                            LocalDateTime dateTime = LocalDateTime.ofInstant(
-                                    Instant.ofEpochMilli(timestampMs),
-                                    ZoneId.systemDefault());
-                            return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:00"));
-                        },
-                        Collectors.counting()));
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("hourlyStats", hourlyStats);
-        return result;
+                        log -> LogTrendIntervalPlanner.bucketStart(
+                                Math.floorDiv(log.getTimeUnixNano(), 1_000_000L), window.intervalMs()),
+                        java.util.TreeMap::new,
+                        Collectors.counting()))
+                .entrySet().stream()
+                .map(entry -> new LogTrendBucket(entry.getKey(), entry.getValue()))
+                .toList();
+        return new LogTrend(window.start(), window.end(), window.intervalMs(), buckets);
     }
 
     @Override
@@ -916,46 +910,60 @@ public class LogQueryServiceImpl implements LogQueryService {
         return null;
     }
 
-    private Map<String, Long> readHourlyStats(String workspaceId, Long start, Long end,
-                                              String traceId, String spanId,
-                                              Integer severityNumber, String severityText, String search,
-                                              String serviceName, String serviceNamespace, String environment,
-                                              Map<String, String> resourceFilters,
-                                              Map<String, String> attributeFilters,
-                                              boolean hideInternal, boolean hideNoise) {
+    private List<LogTrendBucket> readIntervalStats(String workspaceId, TrendWindow window,
+                                                   String traceId, String spanId,
+                                                   Integer severityNumber, String severityText, String search,
+                                                   String serviceName, String serviceNamespace, String environment,
+                                                   Map<String, String> resourceFilters,
+                                                   Map<String, String> attributeFilters,
+                                                   boolean hideInternal, boolean hideNoise) {
         boolean hasAttributeFilters = hasAttributeFilters(resourceFilters, attributeFilters);
         for (HistoryDataReader historyDataReader : historyDataReaders) {
             try {
-                Map<String, Long> aggregate;
+                List<LogTrendBucket> aggregate;
                 if (hasAttributeFilters) {
-                    aggregate = historyDataReader.countLogsByHour(
-                            start, end, traceId, spanId, severityNumber, severityText, search,
+                    aggregate = historyDataReader.countLogsByInterval(
+                            window.start(), window.end(), window.intervalMs(), traceId, spanId,
+                            severityNumber, severityText, search,
                             hiddenServiceNames(hideInternal, hideNoise),
                             shouldRequireServiceName(hideInternal, hideNoise), workspaceId,
                             serviceName, serviceNamespace, environment, resourceFilters, attributeFilters);
                 } else if (hasServiceContext(serviceName, serviceNamespace, environment)) {
-                    aggregate = historyDataReader.countLogsByHour(
-                            start, end, traceId, spanId, severityNumber, severityText, search,
+                    aggregate = historyDataReader.countLogsByInterval(
+                            window.start(), window.end(), window.intervalMs(), traceId, spanId,
+                            severityNumber, severityText, search,
                             hiddenServiceNames(hideInternal, hideNoise),
                             shouldRequireServiceName(hideInternal, hideNoise), workspaceId,
                             serviceName, serviceNamespace, environment);
                 } else if (StringUtils.hasText(workspaceId)) {
-                    aggregate = historyDataReader.countLogsByHour(
-                            start, end, traceId, spanId, severityNumber, severityText, search,
+                    aggregate = historyDataReader.countLogsByInterval(
+                            window.start(), window.end(), window.intervalMs(), traceId, spanId,
+                            severityNumber, severityText, search,
                             hiddenServiceNames(hideInternal, hideNoise),
                             shouldRequireServiceName(hideInternal, hideNoise), workspaceId);
                 } else {
-                    aggregate = historyDataReader.countLogsByHour(
-                            start, end, traceId, spanId, severityNumber, severityText, search,
+                    aggregate = historyDataReader.countLogsByInterval(
+                            window.start(), window.end(), window.intervalMs(), traceId, spanId,
+                            severityNumber, severityText, search,
                             hiddenServiceNames(hideInternal, hideNoise),
                             shouldRequireServiceName(hideInternal, hideNoise));
                 }
-                return aggregate == null ? Map.of() : aggregate;
+                return aggregate == null ? List.of() : aggregate;
             } catch (UnsupportedOperationException ex) {
                 // Fall back to row-based aggregation for history stores without native aggregate support.
             }
         }
         return null;
+    }
+
+    private static TrendWindow resolveTrendWindow(Long start, Long end) {
+        long resolvedEnd = end == null ? System.currentTimeMillis() : end;
+        long resolvedStart = start == null ? resolvedEnd - LogTrendIntervalPlanner.DEFAULT_WINDOW_MS : start;
+        return new TrendWindow(resolvedStart, resolvedEnd,
+                LogTrendIntervalPlanner.select(resolvedStart, resolvedEnd));
+    }
+
+    private record TrendWindow(long start, long end, long intervalMs) {
     }
 
     private List<LogEntry> getFilteredLogs(String workspaceId, Long start, Long end,

@@ -53,6 +53,7 @@ FLAGD_UI_PORT="${OTEL_DEMO_FLAGD_UI_PORT:-18082}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-5}"
 POLL_ATTEMPTS="${POLL_ATTEMPTS:-30}"
 CURL_MAX_TIME_SECONDS="${CURL_MAX_TIME_SECONDS:-15}"
+OTEL_DEMO_METRIC_QUERY="${OTEL_DEMO_METRIC_QUERY:-http_server_request_duration_seconds_count}"
 
 login_token=""
 
@@ -250,10 +251,22 @@ stop_demo_projects() {
   compose_minimal down --remove-orphans >/dev/null 2>&1 || true
 }
 
+build_metrics_console_path() {
+  local metrics_query="$1"
+  local metrics_end metrics_start
+  metrics_end="$(($(date +%s) * 1000 + 60000))"
+  metrics_start="$((metrics_end - 3600000))"
+  printf '/api/ingestion/otlp/metrics/console?start=%s&end=%s&query=%s' \
+    "${metrics_start}" "${metrics_end}" "${metrics_query}"
+}
+
 verify_demo() {
+  local metrics_query
   if [[ -z "${login_token}" ]]; then
     login_hertzbeat
   fi
+  metrics_query="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
+    "${OTEL_DEMO_METRIC_QUERY}")"
 
   log_step "验证 OTLP 概览"
   poll_until "OTLP 三大信号已激活" \
@@ -274,7 +287,7 @@ verify_demo() {
      jq -e '.code == 0 and ((.data.content // []) | map(select(.serviceName == \"frontend\" or .serviceName == \"checkout\" or .serviceName == \"cart\" or .serviceName == \"product-catalog\" or .serviceName == \"image-provider\" or .serviceName == \"flagd\")) | length) >= 1' <<<\"\$response\" >/dev/null"
 
   poll_until "指标工作台已解析到 demo 服务上下文" \
-    "response=\$(api_get '/api/ingestion/otlp/metrics/console' '${login_token}'); \
+    "response=\$(api_get \"\$(build_metrics_console_path '${metrics_query}')\" '${login_token}'); \
      jq -e '.code == 0 and .data.emptyStateReason != \"no_context\" and ((.data.context.serviceName // \"\") | length) > 0 and ((.data.query // \"\") | length) > 0' <<<\"\$response\" >/dev/null"
 
   cat <<EOF
@@ -338,6 +351,7 @@ EOF
 cmd_up() {
   require_bin curl
   require_bin jq
+  require_bin python3
   require_bin git
   require_bin docker
 
@@ -378,6 +392,7 @@ cmd_logs() {
 cmd_verify() {
   require_bin curl
   require_bin jq
+  require_bin python3
   verify_demo
 }
 

@@ -69,7 +69,7 @@ function useMonitorMetricContext(
   const layout = useMonitorMetricLayoutController(monitorLayoutApplication(monitor), realtimeSelection.names);
   const historyCharts = buildHistoryChartEvidence(historySelection, queries);
   const selectedHistoryChart = buildSelectedHistoryChart(metric, historySelection, queries);
-  const investigation = useMonitorInvestigation(monitor, selectedHistoryChart);
+  const investigation = useMonitorInvestigation(monitor, history);
   const actions = buildWorkbenchActions({
     monitor,
     metric,
@@ -116,6 +116,7 @@ function composeMonitorMetricWorkbench(
     historyAvailability: context.historySelection.availability,
     historyCharts: context.historyCharts,
     selectedHistoryChart: context.selectedHistoryChart,
+    investigation: context.investigation.state,
     investigationSignals: context.investigation.signals,
     hasMoreHistoryCharts: context.historySelection.hasMore,
     realtime: context.realtime,

@@ -316,7 +316,7 @@ class GreptimeThreeSignalInstrumentationE2eTest extends GreptimeThreeSignalE2eSu
                 "default", null, null, metricsContext.startedAt(), end, metricsContext.serviceName(),
                 metricsContext.serviceNamespace(), metricsContext.environment(), metricsContext.collectorId(),
                 INSTANCE_ID, ENDPOINT, "hertzbeat_e2e_requests", null, null,
-                null, null, "1s", "20", null));
+                null, null, "1", "20", null));
         assertThat(metrics.getContext().getCollectorId()).isEqualTo(metricsContext.collectorId());
         assertThat(metrics.getContext().getInstance()).isEqualTo(INSTANCE_ID);
         assertThat(metrics.getContext().getEndpoint()).isEqualTo(ENDPOINT);
@@ -335,7 +335,7 @@ class GreptimeThreeSignalInstrumentationE2eTest extends GreptimeThreeSignalE2eSu
                         "default", null, null, metricsContext.startedAt(), end, metricsContext.serviceName(),
                         metricsContext.serviceNamespace(), metricsContext.environment(), metricsContext.collectorId(),
                         "other-instance", ENDPOINT, "hertzbeat_e2e_requests", null, null,
-                        null, null, "1s", "20", null));
+                        null, null, "1", "20", null));
         assertThat(missingInstanceMetrics.getStats().getNonEmptySeries()).isZero();
 
         org.springframework.data.domain.Page<LogEntry> logs = logQueryService.list(

@@ -1,0 +1,256 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0.
+ */
+
+import type { LogData, TraceData } from '@perses-dev/spec';
+import type { AnyValue, KeyValue } from '@perses-dev/spec/dist/dashboard/query-type/otlp/common/v1/common';
+
+import type { ExactTimeWindow } from '@/shared/query-context';
+
+import type {
+  HertzBeatLogRow,
+  HertzBeatTableData,
+  HertzBeatTraceDetail,
+  HertzBeatTraceRow
+} from '../datasource/hertzbeat-query-schema';
+
+export class PersesSignalDataError extends Error {
+  constructor() {
+    super('Perses signal data is incomplete');
+    this.name = 'PersesSignalDataError';
+  }
+}
+
+export function toPersesLogData(data: HertzBeatTableData<HertzBeatLogRow>, window: ExactTimeWindow): LogData {
+  const entries = orderHertzBeatLogRowsForPerses(data.rows).map(row => {
+    const observedNanos = row.timeUnixNano ?? row.observedTimeUnixNano;
+    if (observedNanos == null) throw new PersesSignalDataError();
+    if (typeof row.body !== 'string') assertSafeJsonNumbers(row.body);
+    return {
+      timestamp: unixNanoSeconds(observedNanos),
+      line: typeof row.body === 'string' ? row.body : JSON.stringify(row.body),
+      labels: logLabels(row)
+    };
+  });
+  return {
+    timeRange: { start: new Date(window.from), end: new Date(window.to) },
+    entries,
+    totalCount: data.total,
+    hasMore: data.total > entries.length,
+    direction: 'backward'
+  };
+}
+
+export function orderHertzBeatLogRowsForPerses<Row extends HertzBeatLogRow>(rows: readonly Row[]): Row[] {
+  const ordered = rows.map((row, index) => ({ row, index, timestamp: logTimestamp(row) }));
+  if (ordered.some(item => item.timestamp == null)) return [...rows];
+  return ordered
+    .sort((left, right) => right.timestamp! - left.timestamp! || left.index - right.index)
+    .map(item => item.row);
+}
+
+function logTimestamp(row: HertzBeatLogRow) {
+  const observedNanos = row.timeUnixNano ?? row.observedTimeUnixNano;
+  if (observedNanos == null) return undefined;
+  try {
+    return unixNanoSeconds(observedNanos);
+  } catch (error) {
+    if (error instanceof PersesSignalDataError) return undefined;
+    throw error;
+  }
+}
+
+function unixNanoSeconds(value: string) {
+  if (!/^(0|[1-9]\d{0,19})$/u.test(value)) throw new PersesSignalDataError();
+  const nanos = BigInt(value);
+  if (nanos > 18_446_744_073_709_551_615n) throw new PersesSignalDataError();
+  const seconds = nanos / 1_000_000_000n;
+  const remainder = nanos % 1_000_000_000n;
+  return Number(seconds) + Number(remainder) / 1_000_000_000;
+}
+
+function assertSafeJsonNumbers(value: unknown): void {
+  if (value == null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new PersesSignalDataError();
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(assertSafeJsonNumbers);
+    return;
+  }
+  if (typeof value === 'object') {
+    Object.values(value).forEach(assertSafeJsonNumbers);
+    return;
+  }
+  throw new PersesSignalDataError();
+}
+
+export function toPersesTraceSearchData(data: HertzBeatTableData<HertzBeatTraceRow>, truncated: boolean): TraceData {
+  return {
+    searchResult: data.rows.map(row => {
+      if (
+        !Number.isSafeInteger(row.startTime) ||
+        !Number.isSafeInteger(row.durationNanos) ||
+        row.startTime == null ||
+        row.durationNanos == null ||
+        !row.serviceName?.trim() ||
+        !row.rootSpanName?.trim()
+      ) {
+        throw new PersesSignalDataError();
+      }
+      return {
+        traceId: row.traceId,
+        rootServiceName: row.serviceName,
+        rootTraceName: row.rootSpanName,
+        startTimeUnixMs: row.startTime,
+        durationMs: row.durationNanos / 1_000_000,
+        serviceStats: row.serviceStats
+      };
+    }),
+    metadata: { hasMoreResults: truncated }
+  };
+}
+
+export function toPersesTraceDetailData(detail: HertzBeatTraceDetail): TraceData {
+  if (!detail.spans?.length) throw new PersesSignalDataError();
+  return {
+    trace: {
+      resourceSpans: detail.spans.map(span => toPersesResourceSpan(span, detail.traceId))
+    }
+  };
+}
+
+type HertzBeatTraceSpan = NonNullable<HertzBeatTraceDetail['spans']>[number];
+
+function toPersesResourceSpan(span: HertzBeatTraceSpan, detailTraceId: string) {
+  const traceId = span.traceId ?? detailTraceId;
+  if (!span.spanId || span.startTime == null || span.durationNanos == null) throw new PersesSignalDataError();
+  const startTimeUnixNano = millisecondsToNanos(span.startTime);
+  const endTimeUnixNano = (BigInt(startTimeUnixNano) + toBigInt(span.durationNanos)).toString();
+  return {
+    resource: { attributes: resourceAttributes(span.resourceAttributes, span.serviceName) },
+    scopeSpans: [
+      {
+        scope: {
+          ...(span.scopeName ? { name: span.scopeName } : {}),
+          ...(span.scopeVersion ? { version: span.scopeVersion } : {})
+        },
+        spans: [
+          {
+            traceId,
+            spanId: span.spanId,
+            ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
+            name: span.spanName ?? '',
+            ...(span.spanKind ? { kind: span.spanKind } : {}),
+            startTimeUnixNano,
+            endTimeUnixNano,
+            attributes: keyValues(span.spanAttributes),
+            ...(span.events ? { events: span.events.map(toPersesEvent) } : {}),
+            ...(span.links ? { links: span.links.map(toPersesLink) } : {}),
+            status: traceStatus(span.status, span.statusMessage)
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function toPersesEvent(event: HertzBeatTraceSpan['events'] extends (infer Event)[] | null ? Event : never) {
+  if (event.timeUnixNano == null) throw new PersesSignalDataError();
+  return {
+    timeUnixNano: event.timeUnixNano,
+    name: event.name ?? '',
+    attributes: keyValues(event.attributes)
+  };
+}
+
+function toPersesLink(link: HertzBeatTraceSpan['links'] extends (infer Link)[] | null ? Link : never) {
+  if (!link.traceId || !link.spanId) throw new PersesSignalDataError();
+  return { traceId: link.traceId, spanId: link.spanId, attributes: keyValues(link.attributes) };
+}
+
+function logLabels(row: HertzBeatLogRow) {
+  return {
+    ...primitiveLabels(row.resource, 'resource.'),
+    ...primitiveLabels(row.attributes, 'attribute.'),
+    ...(row.severityText ? { severity: row.severityText } : {}),
+    ...(row.traceId ? { trace_id: row.traceId } : {}),
+    ...(row.spanId ? { span_id: row.spanId } : {})
+  };
+}
+
+function primitiveLabels(values: Record<string, unknown> | null, prefix: string) {
+  if (!values) return {};
+  return Object.fromEntries(
+    Object.entries(values).flatMap(([key, value]) => {
+      if (
+        typeof value === 'number' &&
+        (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)))
+      ) {
+        throw new PersesSignalDataError();
+      }
+      return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        ? [[`${prefix}${key}`, String(value)]]
+        : [];
+    })
+  );
+}
+
+function resourceAttributes(values: Record<string, string> | null, serviceName: string | null) {
+  const resource = { ...(values ?? {}) };
+  if (serviceName && !resource['service.name']) resource['service.name'] = serviceName;
+  return keyValues(resource);
+}
+
+function keyValues(values: Record<string, unknown> | null): KeyValue[] {
+  if (!values) return [];
+  return Object.entries(values).flatMap(([key, value]) => (value == null ? [] : [{ key, value: anyValue(value) }]));
+}
+
+function anyValue(value: NonNullable<unknown>): AnyValue {
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { boolValue: value };
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new PersesSignalDataError();
+    }
+    return Number.isInteger(value) ? { intValue: String(value) } : { doubleValue: value };
+  }
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(anyValue) } };
+  if (value && typeof value === 'object')
+    return { kvlistValue: { values: keyValues(value as Record<string, unknown>) } };
+  throw new PersesSignalDataError();
+}
+
+function traceStatus(status: string | null, message: string | null) {
+  const code =
+    status?.toUpperCase() === 'ERROR'
+      ? 'STATUS_CODE_ERROR'
+      : status?.toUpperCase() === 'OK'
+        ? 'STATUS_CODE_OK'
+        : 'STATUS_CODE_UNSET';
+  return { code, ...(message ? { message } : {}) } as const;
+}
+
+function millisecondsToNanos(value: number) {
+  return (toBigInt(value) * 1_000_000n).toString();
+}
+
+function toBigInt(value: number | string) {
+  if (typeof value === 'string') {
+    if (!/^(0|[1-9]\d{0,18})$/u.test(value) || value > '9223372036854775807') {
+      throw new PersesSignalDataError();
+    }
+    return BigInt(value);
+  }
+  // JSON numbers above this bound have already lost integer precision. Never
+  // present a rounded value to the official OTLP model as exact nanoseconds.
+  if (!Number.isSafeInteger(value) || value < 0) throw new PersesSignalDataError();
+  return BigInt(value);
+}

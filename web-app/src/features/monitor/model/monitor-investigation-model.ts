@@ -12,19 +12,75 @@ import {
   type QueryContext,
   type SignalKind
 } from '@/shared/query-context';
+import { buildEntityDetailPath } from '@/shared/navigation/app-paths';
 
 import type { Monitor } from './monitor-contract';
-import type { MonitorMetricHistory } from './monitor-detail-model';
 
-export type MonitorInvestigationBinding = {
+export type MonitorSignalState = 'ready' | 'empty' | 'unavailable';
+
+export type MonitorInvestigationIdentity = {
   monitorId: number;
   entityId: number;
   entityType: 'service';
   serviceName: string;
-  serviceNamespace?: string | undefined;
-  environment?: string | undefined;
+  serviceNamespace: string | null;
+  environment: string | null;
   signals: readonly SignalKind[];
 };
+
+export type MonitorCollectionEvent = {
+  observedAt: number;
+  durationMillis: number;
+  outcome: 'SUCCESS' | 'FAILURE';
+  collectorId: string;
+  target: string;
+  metricSet: string;
+  failureClass: 'NONE' | 'UNAVAILABLE' | 'UNREACHABLE' | 'UNCONNECTABLE' | 'COLLECTION' | 'TIMEOUT' | 'UNKNOWN';
+  phase: 'UNKNOWN' | 'RESOLVE' | 'CONNECT' | 'AUTHENTICATE' | 'QUERY' | 'PARSE' | 'CONVERT' | 'DISPATCH';
+  fieldCount: number;
+  rowCount: number;
+};
+
+export type MonitorAlertPreview = {
+  id: number;
+  status: 'firing';
+  severity: string | null;
+  summary: string | null;
+  activeAt: number | null;
+};
+
+export type MonitorInvestigationSnapshot = {
+  monitorId: number;
+  window: { start: number; end: number };
+  collection:
+    | { state: 'ready'; source: 'greptime_collection_events'; event: MonitorCollectionEvent }
+    | { state: 'empty' | 'unavailable'; source: 'greptime_collection_events'; event: null };
+  alerts:
+    | {
+        state: 'ready';
+        source: 'current_alerts';
+        scope: 'current';
+        activeCount: number;
+        previews: MonitorAlertPreview[];
+      }
+    | { state: 'empty'; source: 'current_alerts'; scope: 'current'; activeCount: 0; previews: MonitorAlertPreview[] }
+    | {
+        state: 'unavailable';
+        source: 'current_alerts';
+        scope: 'current';
+        activeCount: null;
+        previews: MonitorAlertPreview[];
+      };
+  binding:
+    { state: 'ready'; identity: MonitorInvestigationIdentity } | { state: 'empty' | 'unavailable'; identity: null };
+};
+
+export type MonitorInvestigationViewState =
+  | { kind: 'inactive' }
+  | { kind: 'invalid_window' }
+  | { kind: 'loading'; window: InvestigationTimeWindow }
+  | { kind: 'unavailable' | 'error'; window: InvestigationTimeWindow }
+  | { kind: 'ready'; window: InvestigationTimeWindow; snapshot: MonitorInvestigationSnapshot };
 
 export type MonitorInvestigation = {
   context: QueryContext & { entityId: string; monitorId: string; serviceName: string };
@@ -33,7 +89,7 @@ export type MonitorInvestigation = {
 };
 
 const signalOrder: SignalKind[] = ['metrics', 'logs', 'traces'];
-const historyDuration: Record<MonitorMetricHistory, number> = {
+const historyDuration = {
   '30m': 30 * 60_000,
   '1h': 60 * 60_000,
   '6h': 6 * 60 * 60_000,
@@ -41,11 +97,11 @@ const historyDuration: Record<MonitorMetricHistory, number> = {
   '1W': 7 * 24 * 60 * 60_000,
   '4W': 28 * 24 * 60 * 60_000,
   '12W': 84 * 24 * 60 * 60_000
-};
+} as const;
 
 export function createMonitorInvestigation(
   monitor: Monitor,
-  binding: MonitorInvestigationBinding,
+  binding: MonitorInvestigationIdentity,
   window: InvestigationTimeWindow
 ): MonitorInvestigation {
   requireBinding(monitor, binding);
@@ -57,8 +113,8 @@ export function createMonitorInvestigation(
       entityId: String(binding.entityId),
       monitorId: String(monitor.id),
       serviceName: binding.serviceName.trim(),
-      ...(hasContent(binding.serviceNamespace) ? { serviceNamespace: binding.serviceNamespace!.trim() } : {}),
-      ...(hasContent(binding.environment) ? { environment: binding.environment!.trim() } : {}),
+      ...(hasContent(binding.serviceNamespace) ? { serviceNamespace: binding.serviceNamespace.trim() } : {}),
+      ...(hasContent(binding.environment) ? { environment: binding.environment.trim() } : {}),
       instance: monitor.instance.trim()
     },
     window: { from: window.from, to: window.to, timeZone },
@@ -71,12 +127,25 @@ export function buildMonitorInvestigationSignalPath(investigation: MonitorInvest
   return buildInvestigationSignalHandoffPath(signal, investigation.context, investigation.window);
 }
 
+export function buildMonitorInvestigationEntityPath(entityId: number, window: InvestigationTimeWindow) {
+  const timeZone = normalizeInvestigationTimeZone(window.timeZone);
+  if (!Number.isSafeInteger(entityId) || entityId <= 0 || !validWindow(window) || !timeZone) {
+    throw new Error('Monitor investigation Entity handoff evidence is invalid');
+  }
+  const params = new URLSearchParams({
+    start: String(window.from),
+    end: String(window.to),
+    timeZone
+  });
+  return `${buildEntityDetailPath(entityId)}?${params.toString()}`;
+}
+
 export function monitorInvestigationWindow(
-  history: MonitorMetricHistory,
+  history: keyof typeof historyDuration,
   to: number,
   timeZone: string
 ): InvestigationTimeWindow {
-  const from = to - historyDuration[history];
+  const from = to - Math.min(historyDuration[history], historyDuration['24h']);
   const normalizedTimeZone = normalizeInvestigationTimeZone(timeZone);
   if (!Number.isSafeInteger(to) || to <= 0 || !Number.isSafeInteger(from) || from <= 0 || !normalizedTimeZone) {
     throw new Error('Monitor investigation time evidence is invalid');
@@ -84,7 +153,7 @@ export function monitorInvestigationWindow(
   return { from, to, timeZone: normalizedTimeZone };
 }
 
-function requireBinding(monitor: Monitor, binding: MonitorInvestigationBinding) {
+function requireBinding(monitor: Monitor, binding: MonitorInvestigationIdentity) {
   if (
     !Number.isSafeInteger(monitor.id) ||
     monitor.id <= 0 ||
@@ -113,6 +182,6 @@ function validWindow(window: InvestigationTimeWindow) {
   );
 }
 
-function hasContent(value: string | undefined) {
+function hasContent(value: string | null | undefined): value is string {
   return Boolean(value?.trim());
 }

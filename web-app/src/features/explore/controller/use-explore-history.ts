@@ -20,13 +20,17 @@ import { useMemo } from 'react';
 
 import { loadLogHistoryEvidence, loadMetricSignal, loadTraceSignal } from '../api/explore-api';
 import type { ExploreQuery } from '../model/explore-model';
+import { timeRangeMilliseconds } from '../model/explore-model';
 import type { HistoricalEvidence } from '../model/explore-result-model';
 import { exploreQueryKeys } from './explore-query-keys';
 
 type ExactWindow = { from: number; to: number } | undefined;
 
 export function useExploreHistory(query: ExploreQuery, window: ExactWindow, enabled: boolean, refreshRevision: number) {
-  const evidenceOwner = useMemo(() => historyEvidenceOwner(query, window), [query, window]);
+  const evidenceOwner = useMemo(
+    () => requireHistoryEvidenceOwner(exploreQueryKeys.history(query, window, 0)),
+    [query, window]
+  );
   const queryClient = useQueryClient();
   const queryResult = useQuery({
     ...historyQueryOptions(query, window, refreshRevision),
@@ -43,14 +47,16 @@ export function useExploreHistory(query: ExploreQuery, window: ExactWindow, enab
 function historyQueryOptions(query: ExploreQuery, window: ExactWindow, refreshRevision: number) {
   return queryOptions({
     queryKey: exploreQueryKeys.history(query, window, refreshRevision),
-    queryFn: ({ signal }) => loadHistorical(query, signal),
+    queryFn: ({ signal }) => loadHistorical(query, window, refreshRevision, signal),
     retry: false,
     staleTime: 0
   });
 }
 
-function historyEvidenceOwner(query: ExploreQuery, window: ExactWindow) {
-  return JSON.stringify(exploreQueryKeys.history(query, window, 0));
+function requireHistoryEvidenceOwner(queryKey: readonly unknown[]) {
+  const owner = historyEvidenceOwnerFromKey(queryKey);
+  if (!owner) throw new Error('Explore history key does not carry an evidence owner');
+  return owner;
 }
 
 function historyEvidenceOwnerFromKey(queryKey: readonly unknown[]) {
@@ -62,7 +68,15 @@ function historyEvidenceOwnerFromKey(queryKey: readonly unknown[]) {
     !('refreshRevision' in generation)
   )
     return undefined;
-  return JSON.stringify([queryKey[0], { ...generation, refreshRevision: 0 }, ...queryKey.slice(2)]);
+  const request = queryKey.at(-1);
+  const relative =
+    request && typeof request === 'object' && 'relativeTimeRange' in request && request.relativeTimeRange;
+  const scoped = generation as { context?: unknown; window?: unknown; refreshRevision: unknown };
+  return JSON.stringify([
+    queryKey[0],
+    { ...scoped, window: relative ? 'none' : scoped.window, refreshRevision: 0 },
+    ...queryKey.slice(2)
+  ]);
 }
 
 function latestHistoryEvidence(queryClient: QueryClient, owner: string, signal: ExploreQuery['signal']) {
@@ -86,8 +100,25 @@ function historyRefreshRevisionFromKey(queryKey: readonly unknown[]) {
   return Number.isSafeInteger(revision) && Number(revision) >= 0 ? Number(revision) : undefined;
 }
 
-async function loadHistorical(query: ExploreQuery, signal: AbortSignal): Promise<HistoricalEvidence> {
-  if (query.signal === 'metrics') return { signal: 'metrics', data: await loadMetricSignal(query, signal) };
-  if (query.signal === 'logs') return { signal: 'logs', data: await loadLogHistoryEvidence(query, signal) };
-  return { signal: 'traces', data: await loadTraceSignal(query, signal) };
+async function loadHistorical(
+  query: ExploreQuery,
+  requestedWindow: ExactWindow,
+  revision: number,
+  signal: AbortSignal
+): Promise<HistoricalEvidence> {
+  const window = requestedWindow ?? captureWindow(query);
+  const scopedQuery = { ...query, start: window.from, end: window.to, windowMode: undefined };
+  if (scopedQuery.signal === 'metrics') {
+    return { signal: 'metrics', data: await loadMetricSignal(scopedQuery, signal), window, revision };
+  }
+  if (scopedQuery.signal === 'logs') {
+    return { signal: 'logs', data: await loadLogHistoryEvidence(scopedQuery, signal), window, revision };
+  }
+  return { signal: 'traces', data: await loadTraceSignal(scopedQuery, signal), window, revision };
+}
+
+function captureWindow(query: ExploreQuery) {
+  if (query.start != null && query.end != null && query.start < query.end) return { from: query.start, to: query.end };
+  const to = Date.now();
+  return { from: to - timeRangeMilliseconds(query.timeRange), to };
 }

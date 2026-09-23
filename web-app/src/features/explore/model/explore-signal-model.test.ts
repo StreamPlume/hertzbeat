@@ -22,13 +22,9 @@ import {
   logBody,
   logServiceName,
   logTimestampMs,
-  metricPath,
   metricPoints,
   metricResultState,
-  metricSeries,
-  traceDurationMs,
-  traceHealthState,
-  traceSpanLayout
+  metricSeries
 } from './explore-signal-model';
 
 describe('explore API contracts', () => {
@@ -118,7 +114,7 @@ describe('explore API contracts', () => {
           ]
         })
       )
-    ).toEqual({ kind: 'empty' });
+    ).toEqual({ kind: 'contract_error' });
 
     const ready = metricResultState(
       metricConsole({
@@ -135,62 +131,7 @@ describe('explore API contracts', () => {
     if (ready.kind === 'ready') expect(metricPoints(ready.series[0]!)).toEqual([{ timestamp: 1000, value: 0 }]);
   });
 
-  it('uses the established trace nanosecond duration contract', () => {
-    expect(traceDurationMs({ durationNanos: 3_000_000_000 })).toBe(3000);
-    expect(
-      traceSpanLayout(
-        traceDetail({
-          startTime: 1000,
-          durationNanos: 1_000_000_000,
-          spans: [
-            traceSpan({ spanId: 'root', startTime: 1000, durationNanos: 1_000_000_000 }),
-            traceSpan({ spanId: 'child', parentSpanId: 'root', startTime: 1250, durationNanos: 500_000_000 })
-          ]
-        })
-      )
-    ).toMatchObject([
-      { spanId: 'root', depth: 0, timing: { kind: 'duration', offsetPercent: 0, widthPercent: 100 } },
-      { spanId: 'child', depth: 1, timing: { kind: 'duration', offsetPercent: 25, widthPercent: 50 } }
-    ]);
-  });
-
-  it('keeps missing, partial, and actual zero span timing distinct', () => {
-    const layout = traceSpanLayout(
-      traceDetail({
-        spans: [
-          traceSpan({ spanId: 'missing', startTime: null, durationNanos: null }),
-          traceSpan({ spanId: 'missing-start', startTime: null, durationNanos: 1_000_000 }),
-          traceSpan({ spanId: 'missing-duration', startTime: 1_000, durationNanos: null }),
-          traceSpan({ spanId: 'instant', startTime: 1_000, durationNanos: 0 }),
-          traceSpan({ spanId: 'measured', startTime: 1_000, durationNanos: 1_000_000 })
-        ]
-      })
-    );
-
-    for (const spanId of ['missing', 'missing-start', 'missing-duration']) {
-      const span = layout.find(item => item.spanId === spanId);
-      expect(span).toMatchObject({ timing: { kind: 'unavailable' } });
-      expect(span).not.toHaveProperty('offsetPercent');
-      expect(span).not.toHaveProperty('widthPercent');
-    }
-    expect(layout.find(span => span.spanId === 'instant')).toMatchObject({
-      timing: { kind: 'instant', offsetPercent: 0 }
-    });
-    expect(layout.find(span => span.spanId === 'measured')).toMatchObject({
-      timing: { kind: 'duration', offsetPercent: 0, widthPercent: 100 }
-    });
-  });
-
-  it('classifies trace health only from explicit evidence', () => {
-    expect(traceHealthState({ status: null, errorSpanCount: 0 })).toBe('unknown');
-    expect(traceHealthState({ status: 'OK', errorSpanCount: 0 })).toBe('ok');
-    expect(traceHealthState({ status: 'ERROR', errorSpanCount: 0 })).toBe('error');
-    expect(traceHealthState({ status: null, errorSpanCount: 1 })).toBe('error');
-    expect(traceHealthState({ status: 'OK', errorSpanCount: 1 })).toBe('error');
-    expect(traceHealthState({ status: 'UNSET', errorSpanCount: 0 })).toBe('unknown');
-  });
-
-  it('creates a bounded plot from numeric and numeric-string samples', () => {
+  it('normalizes numeric and numeric-string samples without inventing points', () => {
     const points = metricPoints({
       key: 'one',
       name: 'latency',
@@ -215,14 +156,13 @@ describe('explore API contracts', () => {
       { timestamp: 2001, value: 0 },
       { timestamp: 2002, value: 12.5 }
     ]);
-    expect(metricPath(points, 100, 40)).toBe('M0.00,40.00 L50.00,40.00 L100.00,0.00');
   });
 
   it('reads service context and structured bodies from OTLP logs', () => {
     const row = logRow({ resource: { 'service.name': 'checkout' }, body: { event: 'paid' } });
     expect(logServiceName(row)).toBe('checkout');
     expect(logBody(row)).toBe('{"event":"paid"}');
-    expect(logTimestampMs(logRow({ timeUnixNano: 1_750_000_000_000_000_000 }))).toBe(1_750_000_000_000);
+    expect(logTimestampMs(logRow({ timeUnixNano: '1750000000000000000' }))).toBe(1_750_000_000_000);
   });
 });
 
@@ -247,56 +187,11 @@ function metricConsole(
   };
 }
 
-function traceDetail(
-  override: Partial<import('./explore-signal-contract').TraceDetail> = {}
-): import('./explore-signal-contract').TraceDetail {
-  return {
-    traceId: 'trace-1',
-    rootSpanId: null,
-    serviceName: null,
-    serviceNamespace: null,
-    rootSpanName: null,
-    durationNanos: null,
-    status: null,
-    startTime: null,
-    errorSpanCount: 0,
-    resourceAttributes: null,
-    spans: null,
-    ...override
-  };
-}
-
-function traceSpan(
-  override: Partial<import('./explore-signal-contract').TraceSpan> = {}
-): import('./explore-signal-contract').TraceSpan {
-  return {
-    traceId: 'trace-1',
-    spanId: 'span-1',
-    parentSpanId: null,
-    spanName: null,
-    serviceName: null,
-    status: null,
-    spanKind: null,
-    statusMessage: null,
-    traceState: null,
-    scopeName: null,
-    scopeVersion: null,
-    durationNanos: null,
-    startTime: null,
-    highlighted: false,
-    resourceAttributes: null,
-    spanAttributes: null,
-    events: null,
-    links: null,
-    codeNavigationHint: null,
-    ...override
-  };
-}
-
 function logRow(
   override: Partial<import('./explore-signal-contract').LogRow> = {}
 ): import('./explore-signal-contract').LogRow {
   return {
+    logRecordUid: null,
     timeUnixNano: null,
     observedTimeUnixNano: null,
     severityNumber: null,

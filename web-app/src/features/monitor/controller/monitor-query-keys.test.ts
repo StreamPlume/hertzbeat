@@ -42,6 +42,9 @@ describe('Monitor Query Key factory', () => {
     expect(monitorQueryKeys.list(listQuery)).toEqual(monitorQueryKeys.list({ ...listQuery }));
     expect(monitorQueryKeys.apps('en-US')).toEqual(monitorQueryKeys.apps('en-US'));
     expect(monitorQueryKeys.detail(7)).toEqual(monitorQueryKeys.detail(7));
+    expect(monitorQueryKeys.investigation(7, { from: 1_000, to: 2_000 })).toEqual(
+      monitorQueryKeys.investigation(7, { from: 1_000, to: 2_000 })
+    );
     expect(monitorQueryKeys.importTasks()).toEqual(monitorQueryKeys.importTasks());
     expect(monitorQueryKeys.importTask('7')).not.toEqual(monitorQueryKeys.importTask('8'));
     expect(monitorQueryKeys.collectors()).toEqual(monitorQueryKeys.collectors());
@@ -75,6 +78,10 @@ describe('Monitor Query Key factory', () => {
   it('separates editor and metric resources by every result-changing input', () => {
     expect(monitorQueryKeys.apps('pt-BR')).not.toEqual(monitorQueryKeys.apps('en-US'));
     expect(monitorQueryKeys.detail(8)).not.toEqual(monitorQueryKeys.detail(7));
+    const investigation = monitorQueryKeys.investigation(7, { from: 1_000, to: 2_000 });
+    expect(monitorQueryKeys.investigation(8, { from: 1_000, to: 2_000 })).not.toEqual(investigation);
+    expect(monitorQueryKeys.investigation(7, { from: 999, to: 2_000 })).not.toEqual(investigation);
+    expect(monitorQueryKeys.investigation(7, { from: 1_000, to: 2_001 })).not.toEqual(investigation);
     expect(monitorQueryKeys.appDefines('jvm')).not.toEqual(monitorQueryKeys.appDefines('website'));
     expect(monitorQueryKeys.sdDefines('ssh')).not.toEqual(monitorQueryKeys.sdDefines('http'));
 

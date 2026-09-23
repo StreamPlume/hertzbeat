@@ -16,7 +16,9 @@
  */
 
 import type { TFunction } from 'i18next';
+import type { ExactTimeWindow } from '@/shared/query-context';
 
+import type { MetricExploreQuery } from '../model/explore-query';
 import type { MetricConsole } from '../model/explore-signal-contract';
 import type { MetricResultState } from '../model/explore-signal-model';
 import { ExploreMessageResult, ExploreResultFrame } from './explore-state-panel';
@@ -24,13 +26,16 @@ import { MetricReadyResult } from './metric-ready-result';
 import { SignalEmptyState, SignalResultFrame } from './signal-result-frame';
 
 type MetricResultProps = {
-  data: MetricConsole;
+  data?: MetricConsole | undefined;
   state: MetricResultState;
   retry: () => Promise<void>;
   t: TFunction;
+  query: MetricExploreQuery;
+  timeWindow: ExactTimeWindow | undefined;
+  revision: number;
 };
 
-export function MetricResult({ data, state, retry, t }: MetricResultProps) {
+export function MetricResult({ data, state, retry, t, query, timeWindow, revision }: MetricResultProps) {
   if (state.kind === 'error') {
     return <MetricFailure message={state.message ?? t('explore.loadFailed')} retry={retry} t={t} />;
   }
@@ -43,10 +48,20 @@ export function MetricResult({ data, state, retry, t }: MetricResultProps) {
   if (state.kind === 'unsupported_query') {
     return <ExploreMessageResult kind="unsupported" message={t('explore.states.unsupportedQuery')} />;
   }
+  if (state.kind === 'contract_error' || (state.kind === 'ready' && (!timeWindow || !data))) {
+    return <MetricFailure message={t('explore.states.contractError')} retry={retry} t={t} />;
+  }
   if (state.kind === 'empty') return <MetricEmptyResult t={t} />;
   return (
     <ExploreResultFrame>
-      <MetricReadyResult data={data} series={state.series} t={t} />
+      <MetricReadyResult
+        data={data!}
+        series={state.series}
+        query={query}
+        timeWindow={timeWindow!}
+        revision={revision}
+        t={t}
+      />
     </ExploreResultFrame>
   );
 }

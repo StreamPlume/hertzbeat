@@ -10,24 +10,51 @@ import { theme, type ThemeConfig } from 'antd';
 import type { RuntimeTheme } from '@/core/runtime-preferences';
 
 export function createHertzBeatTheme(runtimeTheme: RuntimeTheme): ThemeConfig {
-  const palette = runtimeTheme === 'default' ? lightPalette : darkPalette;
+  const visual = getHertzBeatVisualTokens(runtimeTheme);
   return {
     algorithm: themeAlgorithm(runtimeTheme),
     cssVar: true,
-    token: themeTokens(palette),
-    components: themeComponents(palette)
+    token: themeTokens(visual),
+    components: themeComponents(visual)
   };
 }
 
-type HertzBeatPalette = typeof darkPalette;
+export type HertzBeatVisualTokens = {
+  mode: 'light' | 'dark';
+  color: typeof darkPalette;
+  font: {
+    sans: string;
+    mono: string;
+    baseSize: number;
+    sectionTitleSize: number;
+    supportingSize: number;
+  };
+  radius: { control: number; surface: number };
+  size: { controlHeight: number; regionHeaderHeight: number };
+  spacing: number;
+};
 
-function themeTokens(palette: HertzBeatPalette): NonNullable<ThemeConfig['token']> {
+const sansFontFamily = 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const monoFontFamily = '"DejaVu Sans Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace';
+
+export function getHertzBeatVisualTokens(runtimeTheme: RuntimeTheme): HertzBeatVisualTokens {
   return {
-    // SigNoz keeps dense controls restrained while Horizon gives larger
-    // surfaces more separation. Six/eight pixels preserves both qualities
-    // without turning an operations console into pill-shaped UI.
-    borderRadius: 6,
-    borderRadiusLG: 8,
+    mode: runtimeTheme === 'default' ? 'light' : 'dark',
+    color: runtimeTheme === 'default' ? lightPalette : darkPalette,
+    font: { sans: sansFontFamily, mono: monoFontFamily, baseSize: 13, sectionTitleSize: 14, supportingSize: 12 },
+    radius: { control: 5, surface: 6 },
+    size: { controlHeight: 32, regionHeaderHeight: 36 },
+    spacing: 4
+  };
+}
+
+function themeTokens(visual: HertzBeatVisualTokens): NonNullable<ThemeConfig['token']> {
+  const palette = visual.color;
+  return {
+    // Dense controls and surfaces stay within the workbench's four-to-six
+    // pixel radius vocabulary instead of reading as detached pills.
+    borderRadius: visual.radius.control,
+    borderRadiusLG: visual.radius.surface,
     colorBgBase: palette.canvas,
     colorBgContainer: palette.chrome,
     colorBgElevated: palette.raised,
@@ -40,31 +67,33 @@ function themeTokens(palette: HertzBeatPalette): NonNullable<ThemeConfig['token'
     colorLink: palette.link,
     colorLinkActive: palette.linkActive,
     colorLinkHover: palette.linkHover,
-    colorPrimary: '#9b5bb3',
-    colorPrimaryActive: '#7f448f',
-    colorPrimaryHover: '#a96abd',
+    colorPrimary: palette.brandAccent,
+    colorPrimaryActive: palette.brandAccentActive,
+    colorPrimaryHover: palette.brandAccentHover,
     colorText: palette.text,
     colorTextSecondary: palette.muted,
-    controlHeight: 32,
-    fontSize: 13,
+    controlHeight: visual.size.controlHeight,
+    fontFamily: visual.font.sans,
+    fontSize: visual.font.baseSize,
     fontSizeHeading2: 24,
     fontSizeHeading4: 14,
     lineHeightHeading2: 1.25
   };
 }
 
-function themeComponents(palette: HertzBeatPalette): NonNullable<ThemeConfig['components']> {
-  return { ...controlComponents(palette), ...surfaceComponents(palette) };
+function themeComponents(visual: HertzBeatVisualTokens): NonNullable<ThemeConfig['components']> {
+  return { ...controlComponents(visual), ...surfaceComponents(visual) };
 }
 
-function controlComponents(palette: HertzBeatPalette): NonNullable<ThemeConfig['components']> {
+function controlComponents(visual: HertzBeatVisualTokens): NonNullable<ThemeConfig['components']> {
+  const palette = visual.color;
   return {
     Button: {
-      borderRadius: 5,
+      borderRadius: visual.radius.control,
       colorError: palette.errorText,
       colorErrorActive: palette.errorTextActive,
       colorErrorHover: palette.errorTextHover,
-      controlHeight: 32,
+      controlHeight: visual.size.controlHeight,
       defaultActiveBorderColor: palette.activeBorder,
       defaultActiveColor: palette.text,
       defaultHoverBg: palette.hover,
@@ -99,7 +128,8 @@ function controlComponents(palette: HertzBeatPalette): NonNullable<ThemeConfig['
   };
 }
 
-function surfaceComponents(palette: HertzBeatPalette): NonNullable<ThemeConfig['components']> {
+function surfaceComponents(visual: HertzBeatVisualTokens): NonNullable<ThemeConfig['components']> {
+  const palette = visual.color;
   return {
     Layout: {
       bodyBg: palette.canvas,
@@ -140,6 +170,9 @@ function surfaceComponents(palette: HertzBeatPalette): NonNullable<ThemeConfig['
 
 const darkPalette = {
   activeBorder: '#a96abd',
+  brandAccent: '#9b5bb3',
+  brandAccentActive: '#7f448f',
+  brandAccentHover: '#a96abd',
   border: '#282d38',
   canvas: '#0d0f14',
   chrome: '#101218',
@@ -157,11 +190,18 @@ const darkPalette = {
   selectedText: '#f4edf6',
   text: '#eceef3',
   textSecondary: '#b8bec9',
-  hoverBorder: '#7a8190'
+  hoverBorder: '#7a8190',
+  focusRing: '#bd7bd0',
+  disabled: '#626a78',
+  success: '#49aa19',
+  warning: '#d89614'
 };
 
 const lightPalette = {
   activeBorder: '#7f448f',
+  brandAccent: '#9b5bb3',
+  brandAccentActive: '#7f448f',
+  brandAccentHover: '#a96abd',
   border: '#dfe3e8',
   canvas: '#f5f6f8',
   chrome: '#ffffff',
@@ -179,7 +219,11 @@ const lightPalette = {
   selectedText: '#71357f',
   text: '#20242c',
   textSecondary: '#4d5563',
-  hoverBorder: '#89919e'
+  hoverBorder: '#89919e',
+  focusRing: '#71357f',
+  disabled: '#9ca3af',
+  success: '#389e0d',
+  warning: '#d48806'
 };
 
 function themeAlgorithm(runtimeTheme: RuntimeTheme) {

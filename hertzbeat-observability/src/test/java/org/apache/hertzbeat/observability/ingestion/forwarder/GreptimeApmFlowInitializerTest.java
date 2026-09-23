@@ -95,7 +95,6 @@ class GreptimeApmFlowInitializerTest {
         assertTrue(sqlStatements.get(1).contains("CREATE FLOW IF NOT EXISTS hertzbeat_apm_red_1m_flow"));
         assertTrue(sqlStatements.get(1).contains("SINK TO hertzbeat_apm_red_1m"));
         assertTrue(sqlStatements.get(1).contains("EXPIRE AFTER '6 hours'::INTERVAL"));
-
         for (HttpEntity<String> entity : entityCaptor.getAllValues()) {
             assertEquals(MediaType.APPLICATION_FORM_URLENCODED, entity.getHeaders().getContentType());
             assertEquals("Basic " + Base64.getEncoder()
@@ -228,7 +227,7 @@ class GreptimeApmFlowInitializerTest {
     }
 
     @Test
-    void retriesApmFlowWithFlattenedTraceResourceColumnsWhenGreptimeSchemaHasNoJsonColumn() {
+    void doesNotInspectOrAdaptTheTraceSchemaWhenTheCanonicalFlowIsRejected() {
         configureGreptimeProperties(true);
         when(restTemplate.exchange(
                 eq("http://greptime:4000/v1/sql?db=public"),
@@ -240,20 +239,14 @@ class GreptimeApmFlowInitializerTest {
                         HttpStatus.BAD_REQUEST,
                         "Bad Request",
                         HttpHeaders.EMPTY,
-                        ("{\"code\":3000,\"error\":\"Failed to plan SQL: No field named resource_attributes. "
-                                + "Did you mean 'hzb_traces.resource_attributes.host.name'?\"}")
+                        "{\"code\":3000,\"error\":\"Failed to plan canonical flow\"}"
                                 .getBytes(StandardCharsets.UTF_8),
-                        StandardCharsets.UTF_8))
-                .thenReturn(ResponseEntity.ok("""
-                        {"output":[{"records":{"schema":{"column_schemas":[{"name":"Column","data_type":"String"}]},
-                        "rows":[["timestamp"],["service_name"],["resource_attributes.host.name"]],"total_rows":3}}]}
-                        """))
-                .thenReturn(ResponseEntity.ok("{}"));
+                        StandardCharsets.UTF_8));
 
         initializer.initialize();
 
         ArgumentCaptor<HttpEntity<String>> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate, times(4)).exchange(
+        verify(restTemplate, times(2)).exchange(
                 eq("http://greptime:4000/v1/sql?db=public"),
                 eq(HttpMethod.POST),
                 entityCaptor.capture(),
@@ -262,15 +255,8 @@ class GreptimeApmFlowInitializerTest {
         List<String> sqlStatements = entityCaptor.getAllValues().stream()
                 .map(this::decodeSql)
                 .toList();
-        assertTrue(sqlStatements.get(2).contains("DESC hzb_traces"));
-        String adaptedFlowSql = sqlStatements.get(3);
-        assertTrue(adaptedFlowSql.contains("CREATE FLOW IF NOT EXISTS hertzbeat_apm_red_1m_flow"));
-        assertTrue(adaptedFlowSql.contains("NULL AS workspace_id"));
-        assertTrue(adaptedFlowSql.contains("NULL AS entity_id"));
-        assertTrue(adaptedFlowSql.contains("NULL AS deployment_environment"));
-        assertTrue(adaptedFlowSql.contains("NULL AS service_namespace"));
-        assertFalse(adaptedFlowSql.contains("json_get_string(resource_attributes"));
-        assertFalse(adaptedFlowSql.contains("resource_attributes.host.name"));
+        assertTrue(sqlStatements.get(1).contains("CREATE FLOW IF NOT EXISTS hertzbeat_apm_red_1m_flow"));
+        assertFalse(sqlStatements.stream().anyMatch(sql -> sql.startsWith("DESC hzb_traces")));
     }
 
     @Test
@@ -321,11 +307,12 @@ class GreptimeApmFlowInitializerTest {
         assertTrue(sql.contains("date_bin('1 minute'::INTERVAL, \"timestamp\") AS time_window"));
         assertTrue(sql.contains("COALESCE(NULLIF(service_name, ''), 'unknown_service') AS service_name"));
         assertTrue(sql.contains("COALESCE(NULLIF(span_name, ''), 'unknown_operation') AS operation"));
-        assertTrue(sql.contains("json_get_string(resource_attributes, '$[\"hertzbeat.workspace_id\"]')"));
-        assertTrue(sql.contains("json_get_string(resource_attributes, '$[\"hertzbeat.entity_id\"]')"));
-        assertTrue(sql.contains("json_get_string(resource_attributes, '$[\"deployment.environment.name\"]')"));
-        assertFalse(sql.contains("json_get_string(resource_attributes, '$[\"deployment.environment\"]')"));
-        assertTrue(sql.contains("json_get_string(resource_attributes, '$[\"service.namespace\"]')"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.workspace_id\" AS workspace_id"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.entity_id\" AS entity_id"));
+        assertTrue(sql.contains("\"resource_attributes.hertzbeat.entity_type\" AS entity_type"));
+        assertTrue(sql.contains("\"resource_attributes.deployment.environment.name\" AS deployment_environment"));
+        assertTrue(sql.contains("\"resource_attributes.service.namespace\" AS service_namespace"));
+        assertFalse(sql.contains("json_get_string("));
         assertTrue(sql.contains("span_status_code IN ('STATUS_CODE_ERROR', 'ERROR')"));
         assertTrue(sql.contains("CASE\n"
                 + "    WHEN span_kind IN ('SPAN_KIND_SERVER', 'SERVER') THEN 'SERVER'\n"
@@ -336,7 +323,9 @@ class GreptimeApmFlowInitializerTest {
         assertTrue(sql.contains("uddsketch_state(128, 0.01, duration_nano) AS duration_sketch"));
         assertTrue(sql.contains("span_kind IN ('SPAN_KIND_SERVER', 'SERVER', 'SPAN_KIND_CONSUMER', 'CONSUMER')"));
         assertTrue(sql.contains("PRIMARY KEY(service_name, operation, span_kind, workspace_id, entity_id, "
-                + "deployment_environment, service_namespace)"));
+                + "entity_type, deployment_environment, service_namespace)"));
+        assertFalse(sql.contains("service_instance_id"));
+        assertFalse(sql.contains("collector_id"));
         assertFalse(lowerSql.contains("drop flow"));
         assertFalse(lowerSql.contains("drop table"));
         assertFalse(lowerSql.contains("trace_id"));

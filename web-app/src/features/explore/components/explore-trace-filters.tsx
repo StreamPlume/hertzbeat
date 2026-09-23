@@ -65,7 +65,7 @@ export function ExploreTraceFilters({ draft, errors, t, updateField }: Props) {
       <Input
         value={draft.attributeFilter}
         onChange={event => updateField({ field: 'attributeFilter', value: event.target.value })}
-        placeholder={t('exploreLog.attributeFilter')}
+        placeholder={t('exploreTrace.attributeFilter')}
       />
       <TraceScopeFilters draft={draft} errors={errors} t={t} updateField={updateField} />
       <Checkbox

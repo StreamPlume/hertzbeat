@@ -67,6 +67,28 @@ public interface OtlpIngestionWorkspaceService {
                 environment, query, filter, groupBy, aggregation, temporalAggregation, step, limit, operationName);
     }
 
+    /** Execute the public metrics console contract with a datasource-enforced series limit. */
+    OtlpMetricsConsoleDto getBoundedMetricsConsole(
+            String workspaceId,
+            Long entityId,
+            String entityType,
+            Long start,
+            Long end,
+            String serviceName,
+            String serviceNamespace,
+            String environment,
+            String collectorId,
+            String instance,
+            String endpoint,
+            String query,
+            String filter,
+            String groupBy,
+            String aggregation,
+            String temporalAggregation,
+            String step,
+            String limit,
+            String operationName);
+
     OtlpMetricsInventoryDto getMetricsInventory(String workspaceId, Long entityId, String entityType, Long start, Long end,
                                                 String serviceName, String serviceNamespace, String environment,
                                                 String limit);

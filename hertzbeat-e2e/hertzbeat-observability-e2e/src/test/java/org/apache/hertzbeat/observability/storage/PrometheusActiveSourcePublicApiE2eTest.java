@@ -136,7 +136,7 @@ class PrometheusActiveSourcePublicApiE2eTest extends GreptimeThreeSignalE2eSuppo
         parameters.put("instance", context.path("serviceInstanceId").asText());
         parameters.put("endpoint", context.path("endpoint").asText());
         parameters.put("query", METRIC_QUERY);
-        parameters.put("step", "1s");
+        parameters.put("step", "1");
         parameters.put("limit", "20");
         await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(1)).untilAsserted(() -> {
             JsonNode data = successfulJson(send(get(

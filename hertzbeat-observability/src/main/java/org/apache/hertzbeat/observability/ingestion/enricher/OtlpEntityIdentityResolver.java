@@ -303,7 +303,7 @@ public class OtlpEntityIdentityResolver {
             if (!entities.containsKey(entry.getKey())) {
                 continue;
             }
-            int score = entry.getValue().matchedIdentityCount();
+            int score = entry.getValue().canonicalIdentityScore();
             if (score > topScore) {
                 topScore = score;
                 topEntityIds.clear();
@@ -554,8 +554,10 @@ public class OtlpEntityIdentityResolver {
             matchedIdentityKeys.add(identityKey);
         }
 
-        private int matchedIdentityCount() {
-            return matchedIdentityKeys.size();
+        private int canonicalIdentityScore() {
+            return matchedIdentityKeys.stream()
+                    .mapToInt(EntityCanonicalIdentityRegistry::defaultPriority)
+                    .sum();
         }
     }
 }

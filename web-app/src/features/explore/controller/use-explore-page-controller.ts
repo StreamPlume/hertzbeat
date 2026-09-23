@@ -32,6 +32,7 @@ import {
   mergeExploreQuery,
   parseExploreQuery,
   querySubmissionTimePatch,
+  timeRangeMilliseconds,
   type ExploreQuery,
   type ExploreQueryPatch
 } from '../model/explore-model';
@@ -42,6 +43,8 @@ import type {
   HistoricalEvidence
 } from '../model/explore-result-model';
 import { metricResultState } from '../model/explore-signal-model';
+import { isMetricConsole } from '../model/explore-signal-contract';
+import { exploreInvestigationRoute } from '../model/explore-investigation-model';
 import { useExploreHistory } from './use-explore-history';
 import { useCanonicalExploreLocation } from './use-canonical-explore-location';
 import { useExploreRouteTime } from './use-explore-route-time';
@@ -58,9 +61,16 @@ export function useExplorePageController() {
   const fixedWindow = exactWindow(parsedQuery);
   const query = parsedQuery;
   const handoff = exploreHandoffState(query);
+  const investigationRoute = exploreInvestigationRoute(query);
   const context = sharedContext?.context ?? exploreQueryContext(query);
-  const historical = handoff !== 'invalid' && !(query.signal === 'logs' && query.live);
-  const { queryResult, evidence } = useExploreHistory(query, fixedWindow, historical, sharedTime?.refreshRevision ?? 0);
+  const historical =
+    handoff !== 'invalid' && investigationRoute.kind === 'inactive' && !(query.signal === 'logs' && query.live);
+  const { queryResult, evidence } = useExploreHistory(
+    query,
+    fixedWindow ?? relativeHistoryWindow(query, sharedTime?.window),
+    historical,
+    sharedTime?.refreshRevision ?? 0
+  );
   const updateQuery = (changes: ExploreQueryPatch) => {
     const next = mergeExploreQuery(query, mergeExploreContextChanges(context, changes));
     setSearchParams(searchFromPath(buildExplorePath(next)));
@@ -81,6 +91,7 @@ export function useExplorePageController() {
   return {
     query,
     handoff,
+    investigationRoute,
     submission,
     result: resolveResult(query, handoff, queryResult.isPending, queryResult.isFetching, queryResult.error, evidence),
     time,
@@ -121,9 +132,8 @@ function resolveResult(
   error: Error | null,
   evidence: HistoricalEvidence | undefined
 ): ExplorePageResultState {
-  if (handoff === 'invalid') return { kind: 'invalid' };
-  if (query.signal === 'logs' && query.live) return { kind: 'live' };
-  if (pending) return { kind: 'loading' };
+  const immediate = immediateResult(query, handoff, pending, evidence);
+  if (immediate) return immediate;
   const current = evidence ? resolveDataResult(query, evidence) : undefined;
   if (error) {
     const errorKind = pageFailureKind(error);
@@ -134,6 +144,17 @@ function resolveResult(
   return current ?? { kind: 'error' };
 }
 
+function immediateResult(
+  query: ExploreQuery,
+  handoff: ReturnType<typeof exploreHandoffState>,
+  pending: boolean,
+  evidence: HistoricalEvidence | undefined
+): ExplorePageResultState | undefined {
+  if (handoff === 'invalid') return { kind: 'invalid' };
+  if (query.signal === 'logs' && query.live) return { kind: 'live' };
+  return pending && !evidence ? { kind: 'loading' } : undefined;
+}
+
 function pageFailureKind(error: Error): ExploreFailureKind {
   const kind = classifyExploreSignalError(error);
   return kind === 'permission' || kind === 'transport_error' || kind === 'contract_error' ? kind : 'error';
@@ -142,21 +163,43 @@ function pageFailureKind(error: Error): ExploreFailureKind {
 function resolveDataResult(query: ExploreQuery, evidence: HistoricalEvidence): ExploreCurrentResultState | undefined {
   if (query.signal !== evidence.signal) return undefined;
   if (evidence.signal === 'metrics') {
-    return { kind: 'metric', state: metricResultState(evidence.data), data: evidence.data };
+    if (!isMetricConsole(evidence.data)) {
+      return { kind: 'metric', state: { kind: 'empty' }, window: evidence.window, revision: evidence.revision };
+    }
+    return {
+      kind: 'metric',
+      state: metricResultState(evidence.data),
+      data: evidence.data,
+      window: evidence.window,
+      revision: evidence.revision
+    };
   }
   if (evidence.signal === 'logs') {
     return {
       kind: evidence.data.page.totalElements === 0 ? 'empty' : 'ready',
       signal: 'logs',
       data: evidence.data.page,
-      statistics: { overview: evidence.data.overview, trend: evidence.data.trend }
+      statistics: { overview: evidence.data.overview, trend: evidence.data.trend },
+      window: evidence.window,
+      revision: evidence.revision
     };
   }
   const page = evidence.data;
-  return { kind: page.totalElements === 0 ? 'empty' : 'ready', signal: 'traces', data: page };
+  return {
+    kind: page.totalElements === 0 ? 'empty' : 'ready',
+    signal: 'traces',
+    data: page,
+    window: evidence.window,
+    revision: evidence.revision
+  };
 }
 
 function searchFromPath(path: string) {
   const marker = path.indexOf('?');
   return marker < 0 ? new URLSearchParams() : new URLSearchParams(path.slice(marker + 1));
+}
+
+function relativeHistoryWindow(query: ExploreQuery, sharedWindow: { from: number; to: number } | undefined) {
+  if (!sharedWindow) return undefined;
+  return { from: sharedWindow.to - timeRangeMilliseconds(query.timeRange), to: sharedWindow.to };
 }

@@ -231,7 +231,7 @@ class AuthenticatedGreptimeThreeSignalPublicApiE2eTest extends GreptimeThreeSign
 
         Map<String, String> metricParameters = new LinkedHashMap<>(parameters);
         metricParameters.put("query", METRIC_QUERY);
-        metricParameters.put("step", "1s");
+        metricParameters.put("step", "1");
         metricParameters.put("limit", "20");
         JsonNode metrics = authenticatedGet("/api/ingestion/otlp/metrics/console", metricParameters, token);
         assertThat(metrics.path("stats").path("nonEmptySeries").asInt()).isZero();
@@ -249,7 +249,7 @@ class AuthenticatedGreptimeThreeSignalPublicApiE2eTest extends GreptimeThreeSign
     private void assertMetricsQuery(JsonNode context, String token) throws Exception {
         Map<String, String> parameters = commonQueryParameters(context);
         parameters.put("query", METRIC_QUERY);
-        parameters.put("step", "1s");
+        parameters.put("step", "1");
         parameters.put("limit", "20");
         JsonNode data = authenticatedGet("/api/ingestion/otlp/metrics/console", parameters, token);
         assertThat(data.path("context").path("collectorId").asText()).isEqualTo(COLLECTOR_ID);

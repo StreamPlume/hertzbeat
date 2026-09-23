@@ -9,6 +9,8 @@ export const entityQueryKeys = {
   list: (scope: string) => [...entityQueryKeys.all, 'list', scope] as const,
   details: () => [...entityQueryKeys.all, 'detail'] as const,
   detail: (id: number | undefined) => [...entityQueryKeys.all, 'detail', id] as const,
+  signal: (id: number, signal: string, window: string, refreshRevision: number) =>
+    [...entityQueryKeys.detail(id), 'signal', signal, window, refreshRevision] as const,
   monitors: (id: number | undefined, query: EntityMonitorQuery) =>
     [...entityQueryKeys.detail(id), 'monitors', normalizeEntityMonitorQuery(query)] as const,
   editor: (id: number | undefined) => [...entityQueryKeys.all, 'editor', id] as const,

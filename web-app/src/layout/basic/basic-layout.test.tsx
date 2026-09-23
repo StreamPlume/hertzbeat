@@ -17,9 +17,9 @@
 
 import { Refine } from '@refinedev/core';
 import routerProvider from '@refinedev/react-router';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { AppProviders } from '@/app/providers';
 import { refineResources, shellAccessControlProvider } from '@/app/refine/refine-resource-registry';
@@ -53,7 +53,10 @@ describe('BasicLayout shell', () => {
     await loadLocale('en-US');
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it('renders the official logo as one constrained accessible brand identity', () => {
     renderLayout();
@@ -124,7 +127,64 @@ describe('BasicLayout shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }));
     expect(screen.getByTestId('shell-navigation')).toHaveAttribute('data-collapsed', 'true');
   });
+
+  it('uses the real collapsed navigation on a narrow Explore route without overwriting manual state', () => {
+    const viewport = controlledExploreViewport(true);
+    vi.stubGlobal('matchMedia', viewport.matchMedia);
+    renderLayout('/explore', <RouteLinks />);
+
+    expect(screen.getByTestId('shell-navigation')).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.queryByRole('button', { name: 'Expand navigation' })).not.toBeInTheDocument();
+    act(() => viewport.setNarrow(false));
+    expect(screen.getByTestId('shell-navigation')).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByRole('button', { name: 'Collapse navigation' })).toBeInTheDocument();
+    act(() => viewport.setNarrow(true));
+    fireEvent.click(screen.getByRole('link', { name: 'Leave Explore test route' }));
+    expect(screen.getByTestId('shell-navigation')).toHaveAttribute('data-collapsed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Open Explore test route' }));
+    act(() => viewport.setNarrow(false));
+    fireEvent.click(screen.getByRole('link', { name: 'Leave Explore test route' }));
+    expect(screen.getByTestId('shell-navigation')).toHaveAttribute('data-collapsed', 'true');
+  });
 });
+
+function RouteLinks() {
+  return (
+    <>
+      <Link to="/explore">Open Explore test route</Link>
+      <Link to="/alerts">Leave Explore test route</Link>
+    </>
+  );
+}
+
+function controlledExploreViewport(initialNarrow: boolean) {
+  let narrow = initialNarrow;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const exploreMedia = {
+    get matches() {
+      return narrow;
+    },
+    media: '(max-width: 768px)',
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+    dispatchEvent: () => false
+  } as MediaQueryList;
+  return {
+    matchMedia: vi.fn((query: string) =>
+      query === exploreMedia.media ? exploreMedia : { ...exploreMedia, matches: false, media: query }
+    ),
+    setNarrow(value: boolean) {
+      narrow = value;
+      const event = { matches: value, media: exploreMedia.media } as MediaQueryListEvent;
+      listeners.forEach(listener => listener(event));
+    }
+  };
+}
 
 function renderLayout(path = '/alerts', routeElement: React.ReactNode = <div>Route content</div>) {
   return render(
@@ -158,6 +218,7 @@ function renderLayout(path = '/alerts', routeElement: React.ReactNode = <div>Rou
                   <Route path="/monitors/:monitorId" element={routeElement} />
                   <Route path="/monitors/:monitorId/edit" element={routeElement} />
                   <Route path="/alerts" element={routeElement} />
+                  <Route path="/explore" element={routeElement} />
                   <Route path="/observability/integration" element={routeElement} />
                   <Route path="/settings/notifications/templates" element={routeElement} />
                 </Route>

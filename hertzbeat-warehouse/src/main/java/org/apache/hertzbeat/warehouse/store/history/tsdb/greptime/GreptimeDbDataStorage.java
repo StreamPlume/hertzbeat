@@ -35,9 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAmount;
@@ -67,6 +65,8 @@ import org.apache.hertzbeat.common.entity.dto.Value;
 import org.apache.hertzbeat.common.entity.event.CollectionExecutionEvent;
 import org.apache.hertzbeat.common.entity.log.LogEntry;
 import org.apache.hertzbeat.common.entity.message.CollectRep;
+import org.apache.hertzbeat.common.entity.metric.NativeMetricSystemContext;
+import org.apache.hertzbeat.common.observability.dto.log.LogTrendBucket;
 import org.apache.hertzbeat.common.support.exception.TelemetryStorageUnavailableException;
 import org.apache.hertzbeat.common.runtime.ConditionalOnNormalBusinessRuntime;
 import org.apache.hertzbeat.common.util.Base64Util;
@@ -79,6 +79,7 @@ import org.apache.hertzbeat.warehouse.store.history.tsdb.AbstractHistoryDataStor
 import org.apache.hertzbeat.warehouse.store.history.tsdb.HistoryDataReader.ServerAvailability;
 import org.apache.hertzbeat.warehouse.store.history.tsdb.vm.PromQlQueryContent;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpEntity;
@@ -133,6 +134,14 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
     private static final String LABEL_KEY_END_TIME = "end";
     private static final int LOG_BATCH_SIZE = 500;
     private static final Pattern DAY_PATTERN = Pattern.compile("^(\\d+)[dD]$");
+    private static final Map<Long, String> LOG_TREND_INTERVAL_LITERALS = Map.of(
+            60_000L, "1 minute",
+            300_000L, "5 minutes",
+            900_000L, "15 minutes",
+            1_800_000L, "30 minutes",
+            3_600_000L, "1 hour",
+            21_600_000L, "6 hours",
+            86_400_000L, "1 day");
     private static final MetricQueryResolutionPlanner METRIC_QUERY_RESOLUTION_PLANNER =
             MetricQueryResolutionPlanner.defaults();
 
@@ -147,21 +156,42 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
     private final GreptimeSqlQueryExecutor greptimeSqlQueryExecutor;
     private final GreptimeQueryGuard queryGuard;
     private final GreptimeServerAvailabilityProbe serverAvailabilityProbe;
+    private final NativeMetricSystemContextResolver nativeMetricSystemContextResolver;
 
-    @Autowired
     public GreptimeDbDataStorage(
             GreptimeProperties greptimeProperties,
             @Qualifier(WarehouseConstants.GREPTIME_QUERY_REST_TEMPLATE) RestTemplate restTemplate,
             GreptimeSqlQueryExecutor greptimeSqlQueryExecutor,
             GreptimeQueryGuard queryGuard) {
         this(greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard,
-                createServerAvailabilityProbe(greptimeProperties));
+                createServerAvailabilityProbe(greptimeProperties), (metricsData, intrinsic) -> intrinsic);
+    }
+
+    @Autowired
+    public GreptimeDbDataStorage(
+            GreptimeProperties greptimeProperties,
+            @Qualifier(WarehouseConstants.GREPTIME_QUERY_REST_TEMPLATE) RestTemplate restTemplate,
+            GreptimeSqlQueryExecutor greptimeSqlQueryExecutor,
+            GreptimeQueryGuard queryGuard,
+            ObjectProvider<NativeMetricSystemContextResolver> nativeMetricSystemContextResolverProvider) {
+        this(greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard,
+                createServerAvailabilityProbe(greptimeProperties),
+                nativeMetricSystemContextResolverProvider.getIfAvailable(() -> (metricsData, intrinsic) -> intrinsic));
     }
 
     GreptimeDbDataStorage(GreptimeProperties greptimeProperties, RestTemplate restTemplate,
                           GreptimeSqlQueryExecutor greptimeSqlQueryExecutor,
                           GreptimeQueryGuard queryGuard,
                           GreptimeServerAvailabilityProbe serverAvailabilityProbe) {
+        this(greptimeProperties, restTemplate, greptimeSqlQueryExecutor, queryGuard, serverAvailabilityProbe,
+                (metricsData, intrinsic) -> intrinsic);
+    }
+
+    GreptimeDbDataStorage(GreptimeProperties greptimeProperties, RestTemplate restTemplate,
+                          GreptimeSqlQueryExecutor greptimeSqlQueryExecutor,
+                          GreptimeQueryGuard queryGuard,
+                          GreptimeServerAvailabilityProbe serverAvailabilityProbe,
+                          NativeMetricSystemContextResolver nativeMetricSystemContextResolver) {
         if (greptimeProperties == null) {
             log.error("init error, please config Warehouse GreptimeDB props in application.yml");
             throw new IllegalArgumentException("please config Warehouse GreptimeDB props");
@@ -171,6 +201,7 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
         this.greptimeSqlQueryExecutor = greptimeSqlQueryExecutor;
         this.queryGuard = Objects.requireNonNull(queryGuard);
         this.serverAvailabilityProbe = Objects.requireNonNull(serverAvailabilityProbe);
+        this.nativeMetricSystemContextResolver = Objects.requireNonNull(nativeMetricSystemContextResolver);
         serverAvailable = initGreptimeDbClient(greptimeProperties);
         if (serverAvailable) {
             applyDatabaseTtlIfConfigured(greptimeProperties);
@@ -253,36 +284,35 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
                     metricsData.getId(), metricsData.getMetrics());
             return;
         }
-        String instance = metricsData.getInstance();
         String app = metricsData.getApp();
         String tableName = getTableName(app, metricsData.getMetrics());
         List<CollectRep.Field> fields = metricsData.getFields();
-        Table table = Table.from(metricSchemaCache.getOrCreate(tableName, fields));
+        GreptimeMetricSchemaCache.ResolvedSchema resolvedSchema = metricSchemaCache.resolve(tableName, fields);
+        Table table = Table.from(resolvedSchema.schema());
+        if (resolvedSchema.schemaChanged() && !resolvedSchema.rejectedNames().isEmpty()) {
+            log.warn("[warehouse greptime] ignored Collector fields that collide with system dimensions: {}",
+                    resolvedSchema.rejectedNames());
+        }
         long collectionTime = metricsData.getTime();
         long timestamp = collectionTime > 0 ? collectionTime : System.currentTimeMillis();
-        Object[] values = new Object[2 + fields.size()];
-        values[0] = instance;
-        values[1] = timestamp;
+        Object[] systemTagValues = resolveNativeMetricSystemContext(metricsData).tagValues();
+        int fieldOffset = systemTagValues.length + 1;
         RowWrapper rowWrapper = metricsData.readRow();
         while (rowWrapper.hasNextRow()) {
             rowWrapper = rowWrapper.nextRow();
-            int index = 0;
+            Object[] values = new Object[fieldOffset + resolvedSchema.sourceIndexes().size()];
+            System.arraycopy(systemTagValues, 0, values, 0, systemTagValues.length);
+            values[systemTagValues.length] = timestamp;
+            int sourceIndex = 0;
+            int acceptedIndex = 0;
             while (rowWrapper.hasNextCell()) {
                 ArrowCell cell = rowWrapper.nextCell();
-                if (CommonConstants.NULL_VALUE.equals(cell.getValue())) {
-                    values[2 + index] = null;
-                } else {
-                    Boolean label = cell.getMetadataAsBoolean(MetricDataConstants.LABEL);
-                    Byte type = cell.getMetadataAsByte(MetricDataConstants.TYPE);
-                    if (label) {
-                        values[2 + index] = cell.getValue();
-                    } else if (type == CommonConstants.TYPE_NUMBER) {
-                        values[2 + index] = Double.parseDouble(cell.getValue());
-                    } else if (type == CommonConstants.TYPE_STRING) {
-                        values[2 + index] = cell.getValue();
-                    }
+                if (acceptedIndex < resolvedSchema.sourceIndexes().size()
+                        && resolvedSchema.sourceIndexes().get(acceptedIndex) == sourceIndex) {
+                    values[fieldOffset + acceptedIndex] = metricCellValue(cell);
+                    acceptedIndex++;
                 }
-                index++;
+                sourceIndex++;
             }
 
             table.addRow(values);
@@ -299,6 +329,33 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
         } catch (Throwable throwable) {
             log.error("[warehouse greptime]--Error occurred: {}", throwable.getMessage());
         }
+    }
+
+    private NativeMetricSystemContext resolveNativeMetricSystemContext(CollectRep.MetricsData metricsData) {
+        NativeMetricSystemContext intrinsic = NativeMetricSystemContext.from(metricsData);
+        try {
+            NativeMetricSystemContext resolved = nativeMetricSystemContextResolver.resolve(metricsData, intrinsic);
+            return resolved == null ? intrinsic : resolved;
+        } catch (RuntimeException exception) {
+            log.warn("[warehouse greptime] native metric entity authority unavailable for monitor {}: {}",
+                    metricsData.getId(), exception.getClass().getSimpleName());
+            return intrinsic;
+        }
+    }
+
+    private Object metricCellValue(ArrowCell cell) {
+        if (CommonConstants.NULL_VALUE.equals(cell.getValue())) {
+            return null;
+        }
+        Boolean label = cell.getMetadataAsBoolean(MetricDataConstants.LABEL);
+        Byte type = cell.getMetadataAsByte(MetricDataConstants.TYPE);
+        if (Boolean.TRUE.equals(label) || type != null && type == CommonConstants.TYPE_STRING) {
+            return cell.getValue();
+        }
+        if (type != null && type == CommonConstants.TYPE_NUMBER) {
+            return Double.parseDouble(cell.getValue());
+        }
+        return null;
     }
 
     @Override
@@ -1150,81 +1207,83 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
     }
 
     @Override
-    public Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName) {
-        return countLogsByHour(startTime, endTime, traceId, spanId, severityNumber, severityText,
+    public List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                    String traceId, String spanId, Integer severityNumber,
+                                                    String severityText, String searchContent,
+                                                    Set<String> excludedServiceNames,
+                                                    boolean requireServiceName) {
+        return countLogsByInterval(startTime, endTime, intervalMs, traceId, spanId, severityNumber, severityText,
                 searchContent, excludedServiceNames, requireServiceName, null);
     }
 
     @Override
-    public Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName,
-                                             String workspaceId) {
-        return countLogsByHour(startTime, endTime, traceId, spanId, severityNumber, severityText,
+    public List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                    String traceId, String spanId, Integer severityNumber,
+                                                    String severityText, String searchContent,
+                                                    Set<String> excludedServiceNames,
+                                                    boolean requireServiceName,
+                                                    String workspaceId) {
+        return countLogsByInterval(startTime, endTime, intervalMs, traceId, spanId, severityNumber, severityText,
                 searchContent, excludedServiceNames, requireServiceName, workspaceId, null, null, null);
     }
 
     @Override
-    public Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName,
-                                             String workspaceId,
-                                             String serviceName,
-                                             String serviceNamespace,
-                                             String environment) {
-        return countLogsByHour(startTime, endTime, traceId, spanId, severityNumber,
+    public List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                    String traceId, String spanId, Integer severityNumber,
+                                                    String severityText, String searchContent,
+                                                    Set<String> excludedServiceNames,
+                                                    boolean requireServiceName,
+                                                    String workspaceId,
+                                                    String serviceName,
+                                                    String serviceNamespace,
+                                                    String environment) {
+        return countLogsByInterval(startTime, endTime, intervalMs, traceId, spanId, severityNumber,
                 severityText, searchContent, excludedServiceNames, requireServiceName,
                 workspaceId, serviceName, serviceNamespace, environment, Map.of(), Map.of());
     }
 
     @Override
-    public Map<String, Long> countLogsByHour(Long startTime, Long endTime, String traceId,
-                                             String spanId, Integer severityNumber,
-                                             String severityText, String searchContent,
-                                             Set<String> excludedServiceNames,
-                                             boolean requireServiceName,
-                                             String workspaceId,
-                                             String serviceName,
-                                             String serviceNamespace,
-                                             String environment,
-                                             Map<String, String> resourceFilters,
-                                             Map<String, String> attributeFilters) {
+    public List<LogTrendBucket> countLogsByInterval(Long startTime, Long endTime, long intervalMs,
+                                                    String traceId, String spanId, Integer severityNumber,
+                                                    String severityText, String searchContent,
+                                                    Set<String> excludedServiceNames,
+                                                    boolean requireServiceName,
+                                                    String workspaceId,
+                                                    String serviceName,
+                                                    String serviceNamespace,
+                                                    String environment,
+                                                    Map<String, String> resourceFilters,
+                                                    Map<String, String> attributeFilters) {
+        String intervalLiteral = logTrendIntervalLiteral(intervalMs);
         try {
-            StringBuilder sql = new StringBuilder("SELECT date_bin('1 hour', timestamp) as hour, ")
+            StringBuilder sql = new StringBuilder("SELECT date_bin('").append(intervalLiteral)
+                    .append("', timestamp) as bucket, ")
                     .append("COUNT(*) as count FROM ").append(LOG_TABLE_NAME);
             buildWhereConditions(sql, startTime, endTime, traceId, spanId, severityNumber, severityText,
                     searchContent, excludedServiceNames, requireServiceName, workspaceId,
                     serviceName, serviceNamespace, environment, resourceFilters, attributeFilters);
-            sql.append(" GROUP BY hour ORDER BY hour ASC");
+            sql.append(" GROUP BY bucket ORDER BY bucket ASC");
             List<Map<String, Object>> rows = StringUtils.hasText(workspaceId)
                     ? greptimeSqlQueryExecutor.executeStrict(sql.toString())
                     : greptimeSqlQueryExecutor.execute(sql.toString());
             if (rows == null || rows.isEmpty()) {
-                return Map.of();
+                return List.of();
             }
-            Map<String, Long> result = new HashMap<>();
+            List<LogTrendBucket> result = new ArrayList<>(rows.size());
             for (Map<String, Object> row : rows) {
-                validateScopedGroupedRow(workspaceId, row, "hour");
-                String hour = formatHourBucket(columnValue(row, "hour"));
-                if (StringUtils.hasText(hour)) {
-                    result.put(hour, aggregateLong(workspaceId, row, "count", false));
+                validateScopedGroupedRow(workspaceId, row, "bucket");
+                Long bucketStart = timestampMillis(columnValue(row, "bucket"));
+                if (bucketStart != null) {
+                    result.add(new LogTrendBucket(bucketStart, aggregateLong(workspaceId, row, "count", false)));
                 }
             }
-            return result;
+            return List.copyOf(result);
         } catch (Exception e) {
             if (StringUtils.hasText(workspaceId)) {
                 throw new TelemetryStorageUnavailableException();
             }
-            log.error("[warehouse greptime-log] countLogsByHour error: {}", e.getMessage(), e);
-            return Map.of();
+            log.error("[warehouse greptime-log] countLogsByInterval error: {}", e.getMessage(), e);
+            return List.of();
         }
     }
 
@@ -1369,18 +1428,17 @@ public class GreptimeDbDataStorage extends AbstractHistoryDataStorage {
         return normalized == null ? 0L : normalized;
     }
 
-    private static String formatHourBucket(Object value) {
+    private static Long timestampMillis(Object value) {
         Long nanos = castTimestampToNanos(value);
-        if (nanos == null) {
-            String fallback = value == null ? null : String.valueOf(value);
-            return StringUtils.hasText(fallback) ? fallback : null;
+        return nanos == null ? null : Math.floorDiv(nanos, 1_000_000L);
+    }
+
+    private static String logTrendIntervalLiteral(long intervalMs) {
+        String literal = LOG_TREND_INTERVAL_LITERALS.get(intervalMs);
+        if (literal == null) {
+            throw new IllegalArgumentException("unsupported log trend interval: " + intervalMs);
         }
-        long epochSecond = Math.floorDiv(nanos, 1_000_000_000L);
-        long nanoAdjustment = Math.floorMod(nanos, 1_000_000_000L);
-        return LocalDateTime.ofInstant(
-                Instant.ofEpochSecond(epochSecond, nanoAdjustment),
-                ZoneId.systemDefault())
-                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:00"));
+        return literal;
     }
 
     private static String safeString(String input) {

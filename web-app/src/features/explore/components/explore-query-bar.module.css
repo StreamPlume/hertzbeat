@@ -17,12 +17,88 @@
 
 .form {
   min-width: 0;
+  padding-bottom: var(--hb-space-2);
 }
 
-.primaryRow {
-  display: grid;
-  grid-template-columns: minmax(280px, 1.6fr) minmax(180px, 0.8fr) minmax(160px, 0.7fr);
+.form :global([data-hb-operational-command-bar]) {
+  min-height: var(--hb-workbench-header-height);
+  align-items: center;
+  padding-block: 2px;
+}
+
+.form :global([data-hb-operational-command-primary]),
+.form :global([data-hb-operational-command-secondary]) {
+  align-self: center;
+}
+
+.form :global(.ant-btn),
+.form :global(.ant-input),
+.form :global(.ant-select-selector) {
+  height: var(--hb-workbench-control-height);
+}
+
+.commandFields {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.logCommandFields {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 760px;
+  grid-template-columns: auto 176px minmax(240px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.toolbarField {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--hb-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.logMode {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.logMode :global(.ant-radio-button-wrapper) {
+  height: var(--hb-workbench-control-height);
+  padding-inline: 12px;
+  border-color: var(--hb-border-subtle);
+  color: var(--hb-text-secondary);
+  line-height: calc(var(--hb-workbench-control-height) - 2px);
+}
+
+.logMode :global(.ant-radio-button-wrapper-checked:not(.ant-radio-button-wrapper-disabled)) {
+  color: var(--hb-brand-accent);
+  background: var(--hb-bg-selected);
+  border-color: var(--hb-border-subtle);
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.queryInput {
+  min-width: 240px;
+  flex: 1 1 360px;
+}
+
+.timeRange {
+  width: 176px;
+  flex: 0 0 176px;
+}
+
+.commandActions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .queryInput :global(input) {
@@ -33,10 +109,12 @@
   font-weight: 600;
 }
 
+.guided,
 .advanced {
   margin-top: 10px;
 }
 
+.guided summary,
 .advanced summary {
   width: max-content;
   color: var(--hb-text-muted);
@@ -45,11 +123,13 @@
   user-select: none;
 }
 
+.guided[open] summary,
 .advanced[open] summary {
   margin-bottom: 10px;
   color: var(--hb-text-secondary);
 }
 
+.guidedFields,
 .advancedFields {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -88,15 +168,80 @@
 }
 
 @media (max-width: 880px) {
-  .primaryRow,
+  .logCommandFields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .guidedFields,
   .advancedFields {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
 }
 
-@media (max-width: 560px) {
-  .primaryRow,
+@media (max-width: 700px) {
+  .form :global([data-hb-operational-command-bar]) {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: end;
+  }
+
+  .logCommandFields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .commandFields {
+    display: flex;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .commandActions {
+    width: 100%;
+    align-items: center;
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+
+  .queryInput,
+  .timeRange {
+    width: 100%;
+    min-width: 0;
+    flex-basis: auto;
+  }
+
+  .logMode {
+    align-self: flex-start;
+  }
+
+  .guidedFields,
   .advancedFields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .form :global(.ant-btn),
+  .form :global(.ant-input),
+  .form :global(.ant-select-selector),
+  .logMode :global(.ant-radio-button-wrapper) {
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .logMode :global(.ant-radio-button-wrapper) {
+    line-height: 34px;
+  }
+}
+
+@media (max-width: 520px) {
+  .form :global([data-hb-operational-command-bar]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .logCommandFields {
+    display: grid;
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .commandActions {
+    justify-content: flex-end;
   }
 }

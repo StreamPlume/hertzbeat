@@ -24,8 +24,8 @@ import { ExploreLoadingResult, ExploreMessageResult, ExploreResultFrame } from '
 import { LogResult } from '../components/log-result';
 import { MetricResult } from '../components/metric-result';
 import { exploreFailureMessageKey, refreshFailureMessageKey } from './explore-result-messages';
-import { ExploreLogPanel } from './explore-log-panel';
-import { ExploreTracePanel } from './explore-trace-panel';
+import { ExplorePersesLogPanel } from './explore-perses-log-panel';
+import { ExplorePersesTracePanel } from './explore-perses-trace-panel';
 
 type ResultPanelProps = {
   query: ExploreQuery;
@@ -127,20 +127,39 @@ function HistoricalResult({
   const { t } = useTranslation();
   if (result.kind === 'metric') {
     return query.signal === 'metrics' ? (
-      <MetricResult data={result.data} state={result.state} retry={retry} t={t} />
+      <MetricResult
+        data={result.data}
+        state={result.state}
+        retry={retry}
+        t={t}
+        query={query}
+        timeWindow={result.window}
+        revision={result.revision}
+      />
     ) : null;
   }
   if (result.signal === 'logs' && query.signal === 'logs')
     return (
-      <ExploreLogPanel
+      <ExplorePersesLogPanel
         data={result.data}
         statistics={result.statistics}
         query={query}
         openPath={openPath}
+        timeWindow={result.window}
+        revision={result.revision}
         evidenceCurrent={evidenceCurrent}
       />
     );
   if (result.signal === 'traces' && query.signal === 'traces')
-    return <ExploreTracePanel data={result.data} query={query} openPath={openPath} evidenceCurrent={evidenceCurrent} />;
+    return (
+      <ExplorePersesTracePanel
+        data={result.data}
+        query={query}
+        openPath={openPath}
+        timeWindow={result.window}
+        revision={result.revision}
+        evidenceCurrent={evidenceCurrent}
+      />
+    );
   return null;
 }

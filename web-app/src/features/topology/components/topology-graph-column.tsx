@@ -44,7 +44,7 @@ export function TopologyGraphColumn({
     <main className={styles.graphColumn}>
       <div className={styles.canvasFrame}>
         <TopologyCanvas
-          ref={canvasRef}
+          ref={canvasRef as RefObject<TopologyCanvasHandle> | undefined}
           presentation={presentation}
           interaction={interaction}
           onClearSelection={actions.clearSelection}

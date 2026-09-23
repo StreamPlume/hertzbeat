@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAlertIntegrationPath,
+  buildAlertInvestigationRoutePath,
   buildEntityDetailPath,
   buildEntityEditPath,
   buildMonitorDetailPath,
@@ -56,6 +57,11 @@ describe('application path builders', () => {
 
   it('builds the canonical external-alert integration path without query data', () => {
     expect(buildAlertIntegrationPath('prometheus')).toBe('/alerts/integrations/prometheus');
+  });
+
+  it('builds the durable single-alert investigation route from its canonical template', () => {
+    expect(buildAlertInvestigationRoutePath(11)).toBe('/alerts/11/investigate');
+    expect(() => buildAlertInvestigationRoutePath(0)).toThrow('Alert identity is invalid');
   });
 
   it('builds canonical resource create and edit paths centrally', () => {

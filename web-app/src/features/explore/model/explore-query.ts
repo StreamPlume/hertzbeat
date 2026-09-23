@@ -53,6 +53,7 @@ export type MetricExploreQuery = SharedExploreQuery & {
 
 export type LogExploreQuery = SharedExploreQuery & {
   signal: 'logs';
+  logRecordUid?: string | undefined;
   live?: boolean | undefined;
   severityText?: string | undefined;
   traceId?: string | undefined;
@@ -80,6 +81,9 @@ export type TraceExploreQuery = SharedExploreQuery & {
 
 export type ExploreQuery = MetricExploreQuery | LogExploreQuery | TraceExploreQuery;
 
+const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const SPAN_ID_PATTERN = /^[0-9a-f]{16}$/u;
+
 export type ExploreQueryPatch = {
   signal?: ExploreSignal | undefined;
   timeRange?: ExploreTimeRange | undefined;
@@ -99,6 +103,7 @@ export type ExploreQueryPatch = {
   end?: number | undefined;
   timeZone?: string | undefined;
   traceId?: string | undefined;
+  logRecordUid?: string | undefined;
   errorOnly?: boolean | undefined;
   live?: boolean | undefined;
   severityText?: string | undefined;
@@ -131,12 +136,25 @@ export function timeRangeMilliseconds(timeRange: ExploreTimeRange) {
 }
 
 export function exploreHandoffState(query: ExploreQuery): 'none' | 'scoped' | 'invalid' {
+  const focused = focusedInvestigationHandoffState(query);
+  if (focused) return focused;
+  const entityInvestigation = entityInvestigationHandoffState(query);
+  if (entityInvestigation) return entityInvestigation;
+  const entityOrMonitor = entityOrMonitorHandoffState(query);
+  return entityOrMonitor ?? onboardingHandoffState(query);
+}
+
+function entityOrMonitorHandoffState(query: ExploreQuery): 'scoped' | 'invalid' | undefined {
   if ([query.entityId, query.monitorId, query.timeZone].some(isPresent)) {
     return [query.entityId, query.monitorId, query.serviceName, query.timeZone].every(isPresent) &&
       validExactWindow(query.start, query.end)
       ? 'scoped'
       : 'invalid';
   }
+  return undefined;
+}
+
+function onboardingHandoffState(query: ExploreQuery): 'none' | 'scoped' | 'invalid' {
   // Ordinary Explore filters can include a namespace. Only onboarding-owned identity/window markers activate
   // the stricter handoff contract.
   if (![query.intakeProfileId, query.collectorId, query.windowMode].some(isPresent)) {
@@ -153,6 +171,63 @@ export function exploreHandoffState(query: ExploreQuery): 'none' | 'scoped' | 'i
   return validExactWindow(query.start, query.end) ? 'scoped' : 'invalid';
 }
 
+function focusedInvestigationHandoffState(query: ExploreQuery): 'scoped' | 'invalid' | undefined {
+  const selectedLog = query.signal === 'logs' && query.logRecordUid != null;
+  const selectedTrace = query.signal === 'traces' && query.traceId != null;
+  const hasTimeEvidence = query.start != null || query.end != null || query.timeZone != null;
+  if (!selectedLog && !(selectedTrace && hasTimeEvidence)) return undefined;
+  if (query.signal === 'logs' && query.live) return 'invalid';
+  return validFocusedIdentity(query) && validFocusedWindow(query) ? 'scoped' : 'invalid';
+}
+
+function validFocusedIdentity(query: ExploreQuery) {
+  if (query.signal === 'logs') {
+    return (
+      validLogRecordUid(query.logRecordUid) && validOptionalTraceId(query.traceId) && validOptionalSpanId(query.spanId)
+    );
+  }
+  return query.signal === 'traces' && validTraceId(query.traceId) && validOptionalSpanId(query.spanId);
+}
+
+function validLogRecordUid(value: string | undefined) {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
+}
+
+function validOptionalTraceId(value: string | undefined) {
+  return value == null || validTraceId(value);
+}
+
+function validOptionalSpanId(value: string | undefined) {
+  return value == null || (typeof value === 'string' && SPAN_ID_PATTERN.test(value));
+}
+
+function validTraceId(value: string | undefined) {
+  return typeof value === 'string' && TRACE_ID_PATTERN.test(value);
+}
+
+function validFocusedWindow(query: ExploreQuery) {
+  return (
+    validExactWindow(query.start, query.end) &&
+    query.end! - query.start! <= 24 * 60 * 60_000 &&
+    validTimeZone(query.timeZone)
+  );
+}
+
+function validTimeZone(value: string | undefined) {
+  if (!value) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function entityInvestigationHandoffState(query: ExploreQuery): 'scoped' | 'invalid' | undefined {
+  if (!isPresent(query.entityId) || isPresent(query.monitorId) || !isPresent(query.timeZone)) return undefined;
+  return validExactWindow(query.start, query.end) ? 'scoped' : 'invalid';
+}
+
 export function exploreUsesExactWindow(query: ExploreQuery) {
   return (
     exploreHandoffState(query) !== 'invalid' &&
@@ -166,5 +241,7 @@ function isPresent(value: unknown) {
 }
 
 function validExactWindow(start: number | undefined, end: number | undefined) {
-  return start != null && end != null && start < end;
+  return (
+    start != null && end != null && Number.isSafeInteger(start) && Number.isSafeInteger(end) && start > 0 && start < end
+  );
 }

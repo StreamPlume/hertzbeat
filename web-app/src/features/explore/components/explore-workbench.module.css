@@ -15,21 +15,59 @@
  * limitations under the License.
  */
 
-.scope {
+.workspace {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 2px;
+  width: 100%;
+  min-width: 0;
+  height: calc(100dvh - var(--hb-shell-header-height, 52px) - 62px);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--hb-bg-raised);
 }
 
-.timeRange {
-  width: 176px;
+.pageHeader {
+  display: flex;
+  height: 56px;
+  min-height: 56px;
+  align-items: center;
+  flex: 0 0 56px;
+  border-bottom: 1px solid var(--hb-border-subtle);
+}
+
+.pageHeader :global([data-hb-operational-page-header]) {
+  width: 100%;
+}
+
+.pageHeader :global(h2.ant-typography) {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.signalPanel {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.signalPanel > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.signalPanel :global([data-hb-operational-result-region]) {
+  gap: 0;
 }
 
 .navigationRow {
   display: flex;
-  align-items: flex-end;
-  min-height: 43px;
+  align-items: stretch;
+  min-height: var(--hb-workbench-header-height);
+  flex: 0 0 var(--hb-workbench-header-height);
   border-bottom: 1px solid var(--hb-border-subtle);
 }
 
@@ -42,7 +80,7 @@
 .signal,
 .activeSignal {
   position: relative;
-  height: 43px;
+  height: var(--hb-workbench-header-height);
   padding: 0;
   border: 0;
   color: var(--hb-text-muted);
@@ -57,6 +95,12 @@
   color: var(--hb-text-primary);
 }
 
+.signal:focus-visible,
+.activeSignal:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 2px;
+}
+
 .activeSignal::after {
   position: absolute;
   right: 0;
@@ -67,17 +111,26 @@
   content: '';
 }
 
-.logMode {
-  display: flex;
-  gap: 2px;
-  margin: 0 0 7px auto;
-  padding: 2px;
-  border: 1px solid var(--hb-border-subtle);
-  border-radius: 5px;
-  background: var(--hb-bg-raised);
-}
+@media (max-width: 768px) {
+  :global(body:has([data-explore-workspace='true'])) {
+    min-width: 0;
+  }
 
-.logMode :global(.ant-btn) {
-  height: 28px;
-  padding-inline: 12px;
+  :global(body:has([data-explore-workspace='true']) [data-testid='shell-time-policy']),
+  :global(body:has([data-explore-workspace='true']) [data-testid='shell-status-greptime']),
+  :global(body:has([data-explore-workspace='true']) [data-testid='shell-status-collector']) {
+    display: none;
+  }
+
+  .workspace {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .signalNavigation {
+    width: 100%;
+    justify-content: space-between;
+    gap: 12px;
+  }
 }

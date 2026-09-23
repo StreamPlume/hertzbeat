@@ -5,6 +5,8 @@ import { I18nextProvider } from 'react-i18next';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { i18n, initializeI18n, loadLocale } from '@/core/i18n/i18n';
+import { createSignalCapabilities } from '@/features/investigation';
+import type { EntitySignalViewState } from '../model/entity-signal-view-model';
 import { EntityDetailView } from './entity-detail-view';
 
 const entity = {
@@ -82,6 +84,20 @@ describe('EntityDetailView', () => {
     expect(topology).not.toHaveBeenCalled();
   });
 
+  it('renders independent signal investigation beside degraded legacy evidence with unknown bindings', () => {
+    renderView(
+      { kind: 'degraded', entity: { ...entity, owner: 'payments-sre' }, unavailable: 'telemetry' },
+      { signals: degradedSignals() }
+    );
+
+    expect(screen.getByText(i18n.t('entity.degraded.title'))).toBeInTheDocument();
+    expect(screen.getByText('payments-sre')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: i18n.t('entity.signals.title') })).toBeInTheDocument();
+    const bindings = screen.getByRole('region', { name: i18n.t('entity.signals.boundMonitors') });
+    expect(within(bindings).getByText('Monitor binding evidence is unavailable.')).toBeInTheDocument();
+    expect(within(bindings).queryByText('No bound monitors.')).not.toBeInTheDocument();
+  });
+
   it('offers only evidence-backed Explore handoffs', () => {
     const explore = vi.fn();
     renderView(
@@ -100,6 +116,29 @@ describe('EntityDetailView', () => {
     fireEvent.click(screen.getByRole('button', { name: i18n.t('entity.explore.logs') }));
     expect(explore).toHaveBeenCalledWith('logs');
     expect(screen.queryByRole('button', { name: i18n.t('entity.explore.metrics') })).not.toBeInTheDocument();
+  });
+
+  it('keeps a monitor-backed Metrics handoff visible when exact-window RED is empty', () => {
+    const explore = vi.fn();
+    renderView(
+      {
+        kind: 'ready',
+        detail: {
+          entity: { ...entity, type: 'host' },
+          identities: [],
+          monitorPreview: {
+            items: [{ id: 3, name: 'host-ping', app: 'ping', instance: '10.0.0.7' }],
+            total: 1,
+            complete: true
+          },
+          relations: []
+        }
+      },
+      { explore, signals: unknownMetricSignals() }
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('entity.explore.metrics') }));
+    expect(explore).toHaveBeenCalledWith('metrics');
   });
 
   it('offers topology inspection for every ready entity in a read-only session', () => {
@@ -503,6 +542,7 @@ type RenderViewOptions = {
   changeMonitorPage?: Parameters<typeof EntityDetailView>[0]['actions']['changeMonitorPage'];
   nextAction?: Parameters<typeof EntityDetailView>[0]['actions']['nextAction'];
   topology?: Parameters<typeof EntityDetailView>[0]['actions']['topology'];
+  signals?: EntitySignalViewState;
 };
 
 function renderView(
@@ -521,7 +561,8 @@ function renderView(
     monitors: options.monitors,
     changeMonitorPage: options.changeMonitorPage ?? (() => undefined),
     nextAction: options.nextAction ?? (() => undefined),
-    topology: options.topology ?? (() => undefined)
+    topology: options.topology ?? (() => undefined),
+    signals: options.signals
   });
 }
 
@@ -539,7 +580,8 @@ function renderResolvedView(
     monitors,
     changeMonitorPage,
     nextAction,
-    topology
+    topology,
+    signals
   }: {
     explore: NonNullable<RenderViewOptions['explore']>;
     remove: NonNullable<RenderViewOptions['remove']>;
@@ -553,6 +595,7 @@ function renderResolvedView(
     changeMonitorPage: NonNullable<RenderViewOptions['changeMonitorPage']>;
     nextAction: NonNullable<RenderViewOptions['nextAction']>;
     topology: NonNullable<RenderViewOptions['topology']>;
+    signals: RenderViewOptions['signals'];
   }
 ) {
   const records = evidence.kind === 'ready' ? evidence.detail.monitorPreview.items : [];
@@ -573,6 +616,7 @@ function renderResolvedView(
           canWrite,
           canDelete,
           monitors: monitorState,
+          ...(signals ? { signals } : {}),
           ...(deleteFailure ? { deleteFailure } : {})
         }}
         actions={{
@@ -592,4 +636,31 @@ function renderResolvedView(
       />
     </I18nextProvider>
   );
+}
+
+function unknownMetricSignals(): Extract<EntitySignalViewState, { kind: 'ready' }> {
+  const window = { from: 1_750_000_000_000, to: 1_750_000_060_000 };
+  return {
+    kind: 'ready',
+    plan: {
+      anchor: { source: 'entity', context: { entityId: '7' }, window: { ...window, timeZone: 'UTC' } },
+      logsQuery: { signal: 'logs', queryKind: 'table', timeWindow: window, context: { entityId: '7' } },
+      tracesQuery: { signal: 'traces', queryKind: 'table', timeWindow: window, context: { entityId: '7' } }
+    },
+    capabilities: createSignalCapabilities({ metrics: 'unknown', redMetrics: 'empty' }),
+    red: { state: 'empty' },
+    evidence: [],
+    boundMonitors: { state: 'known', total: 1, names: ['host-ping'] },
+    topology: { names: [] },
+    alerts: {}
+  };
+}
+
+function degradedSignals(): Extract<EntitySignalViewState, { kind: 'ready' }> {
+  return {
+    ...unknownMetricSignals(),
+    boundMonitors: { state: 'unknown' },
+    topology: { names: [] },
+    alerts: {}
+  };
 }

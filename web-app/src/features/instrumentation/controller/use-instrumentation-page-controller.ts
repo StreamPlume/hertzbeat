@@ -113,7 +113,10 @@ function useInstrumentationFlowLifetime() {
   return { generationRef, startedAtRef, timerRef };
 }
 
-function useControllerLifetime(generationRef: React.RefObject<number>, timerRef: React.RefObject<number | undefined>) {
+function useControllerLifetime(
+  generationRef: React.MutableRefObject<number>,
+  timerRef: React.MutableRefObject<number | undefined>
+) {
   useEffect(
     () => () => {
       // Token state is destroyed with this controller and is never persisted.
@@ -127,7 +130,7 @@ function useControllerLifetime(generationRef: React.RefObject<number>, timerRef:
 function useOpenQuery(
   detection: DetectionResponse | undefined,
   navigate: ReturnType<typeof useNavigate>,
-  tokenAcknowledgementRequiredRef: React.RefObject<boolean>
+  tokenAcknowledgementRequiredRef: React.MutableRefObject<boolean>
 ) {
   return useCallback(
     (signal: Signal) => {
@@ -166,9 +169,9 @@ function useDetection(
   setDetection: (value: DetectionResponse | undefined) => void,
   setDetecting: (value: boolean) => void,
   setDetectionError: (value: boolean) => void,
-  startedAtRef: React.RefObject<number | undefined>,
-  timerRef: React.RefObject<number | undefined>,
-  generationRef: React.RefObject<number>
+  startedAtRef: React.MutableRefObject<number | undefined>,
+  timerRef: React.MutableRefObject<number | undefined>,
+  generationRef: React.MutableRefObject<number>
 ) {
   return useCallback(
     async function runDetection() {

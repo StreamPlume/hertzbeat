@@ -29,12 +29,19 @@ import org.apache.hertzbeat.alert.service.AlertGroupEvidenceRequestException;
 import org.apache.hertzbeat.alert.service.AlertGroupEvidenceService;
 import org.apache.hertzbeat.alert.service.AlertGroupNotFoundException;
 import org.apache.hertzbeat.alert.service.AlertGroupStatusNotSupportedException;
+import org.apache.hertzbeat.alert.service.AlertInvestigationNotFoundException;
+import org.apache.hertzbeat.alert.service.AlertInvestigationReadModelService;
+import org.apache.hertzbeat.alert.service.AlertInvestigationRequestException;
 import org.apache.hertzbeat.alert.service.AlertService;
 import org.apache.hertzbeat.common.entity.alerter.GroupAlert;
 import org.apache.hertzbeat.common.entity.alerter.SingleAlert;
 import org.apache.hertzbeat.common.entity.dto.Message;
 import org.apache.hertzbeat.common.entity.dto.PageResponse;
 import org.apache.hertzbeat.common.observability.gateway.AuthTokenRequestContext;
+import org.apache.hertzbeat.common.observability.gateway.AuthTokenScopes;
+import org.apache.hertzbeat.common.observability.dto.investigation.AlertInvestigationView;
+import org.apache.hertzbeat.common.observability.dto.investigation.InvestigationWindow;
+import org.apache.hertzbeat.warehouse.query.admission.ObservabilityQueryAdmissionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -62,12 +69,21 @@ public class AlertsController {
             "Invalid alert group evidence request.";
     private static final String ALERT_GROUP_EVIDENCE_QUERY_FAILED_MESSAGE =
             "Alert group evidence query failed.";
+    private static final String ALERT_INVESTIGATION_NOT_FOUND_MESSAGE = "Alert was not found.";
+    private static final String INVALID_ALERT_INVESTIGATION_REQUEST_MESSAGE =
+            "Invalid alert investigation request.";
 
     @Autowired
     private AlertService alertService;
 
     @Autowired
     private AlertGroupEvidenceService alertGroupEvidenceService;
+
+    @Autowired
+    private AlertInvestigationReadModelService alertInvestigationReadModelService;
+
+    @Autowired
+    private ObservabilityQueryAdmissionService queryAdmissionService;
 
     @GetMapping
     @Operation(summary = "Query Alarms")
@@ -81,6 +97,33 @@ public class AlertsController {
         Page<SingleAlert> alertPage = alertService.getSingleAlerts(AuthTokenRequestContext.currentWorkspaceId(),
                 status, search, sort, order, pageIndex, pageSize);
         return ResponseEntity.ok(Message.success(alertPage));
+    }
+
+    @GetMapping("/{alertId}/investigation")
+    @Operation(summary = "Query one bounded alert investigation")
+    public ResponseEntity<Message<AlertInvestigationView>> getAlertInvestigation(
+            @PathVariable("alertId") long alertId,
+            @RequestParam("start") long start,
+            @RequestParam("end") long end) {
+        try {
+            validateInvestigationSelection(alertId, start, end);
+            String workspaceId = AuthTokenScopes.normalizeWorkspaceId(
+                    AuthTokenRequestContext.currentWorkspaceId());
+            AlertInvestigationView view = queryAdmissionService.execute("topology",
+                    () -> alertInvestigationReadModelService.query(workspaceId, alertId, start, end));
+            return ResponseEntity.ok(Message.success(view));
+        } catch (AlertInvestigationNotFoundException exception) {
+            return ResponseEntity.ok(Message.fail(FAIL_CODE, ALERT_INVESTIGATION_NOT_FOUND_MESSAGE));
+        } catch (AlertInvestigationRequestException | IllegalArgumentException exception) {
+            return ResponseEntity.ok(Message.fail(FAIL_CODE, INVALID_ALERT_INVESTIGATION_REQUEST_MESSAGE));
+        }
+    }
+
+    private static void validateInvestigationSelection(long alertId, long start, long end) {
+        if (alertId <= 0L) {
+            throw new AlertInvestigationRequestException();
+        }
+        new InvestigationWindow(start, end);
     }
 
     @GetMapping("/group")

@@ -17,6 +17,8 @@
 
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
+import ptBRExploreMessages from '@/assets/i18n/explore/pt-br.json';
+
 const slowChineseBundle = vi.hoisted(() => {
   let resolve!: () => void;
   const promise = new Promise<void>(complete => {
@@ -59,6 +61,14 @@ describe('locale resolution', () => {
 
   it('falls back to English', () => {
     expect(resolveLocale('fr-FR')).toBe('en-US');
+  });
+
+  it('publishes the focused investigation group from the lazy Explore bundle', async () => {
+    i18n.removeResourceBundle('pt-BR', 'translation');
+
+    await expect(loadLocale('pt-BR')).resolves.toBe(true);
+
+    expect(i18n.t('exploreInvestigation.title')).toBe(ptBRExploreMessages.exploreInvestigation.title);
   });
 
   it('does not publish an older slow locale after a newer locale has completed', async () => {

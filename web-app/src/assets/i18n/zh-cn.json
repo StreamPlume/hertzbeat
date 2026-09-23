@@ -336,6 +336,87 @@
       }
     },
     "explore": { "metrics": "查询指标", "logs": "查询日志", "traces": "查询链路" },
+    "signals": {
+      "title": "实体信号调查",
+      "availability": "信号可用性",
+      "invalidWindow": "请选择不超过 24 小时的有效时间窗口。",
+      "openExplore": "在探索中打开",
+      "items": "{{count}} 项",
+      "traceDetail": "链路详情",
+      "boundMonitors": "绑定监控",
+      "boundMonitorsState": { "unknown": "监控绑定证据不可用。", "empty": "没有绑定监控。" },
+      "sections": {
+        "metrics": "指标",
+        "logs": "日志",
+        "traces": "链路",
+        "topology": "拓扑",
+        "collection": "采集",
+        "alerts": "告警"
+      },
+      "states": { "available": "可用", "empty": "无数据", "unavailable": "不可用", "unknown": "未知" },
+      "compact": {
+        "metrics": {
+          "empty": "该时间窗口没有 RED 指标",
+          "unavailable": "RED 指标不可用",
+          "unknown": "RED 指标可用性未知"
+        },
+        "redMetrics": {
+          "empty": "该时间窗口没有 RED 指标，其他指标源状态未知",
+          "unavailable": "RED 指标不可用，其他指标源状态未知"
+        },
+        "logs": { "empty": "该时间窗口没有日志", "unavailable": "日志不可用", "unknown": "日志可用性未知" },
+        "traces": { "empty": "该时间窗口没有链路", "unavailable": "链路不可用", "unknown": "链路可用性未知" },
+        "topology": { "empty": "没有关联实体", "unavailable": "拓扑不可用", "unknown": "拓扑可用性未知" },
+        "collection": {
+          "empty": "该时间窗口没有采集执行记录",
+          "unavailable": "采集执行证据不可用",
+          "unknown": "当前视图没有采集执行证据"
+        },
+        "alerts": {
+          "empty": "该时间窗口没有告警证据",
+          "unavailable": "告警证据不可用",
+          "unknown": "时间窗口内的告警证据未知"
+        }
+      },
+      "red": { "requestRate": "请求速率", "errorRate": "错误率", "latencyP95": "P95 延迟", "requests": "请求数" },
+      "aria": {
+        "requestRate": "请求速率可视化",
+        "errorRate": "错误率可视化",
+        "latencyP95": "P95 延迟可视化",
+        "logs": "日志证据可视化",
+        "traces": "链路证据可视化",
+        "traceDetail": "链路详情可视化"
+      },
+      "evidence": {
+        "title": "证据",
+        "empty": "该时间窗口没有可关联的证据。",
+        "greptimeFlow": "Greptime Flow · {{resolution}} 秒",
+        "reasons": {
+          "exact-span": "精确 Span",
+          "exact-trace": "精确 Trace",
+          "same-entity": "同一实体",
+          "bound-monitor": "绑定监控",
+          "canonical-otel-identity": "标准 OpenTelemetry 身份",
+          "topology-related": "拓扑关系",
+          "time-proximity": "时间邻近"
+        },
+        "confidence": { "exact": "精确匹配", "high": "高置信度", "medium": "中等置信度", "low": "低置信度" }
+      },
+      "alertsCurrentOnly": "当前活跃告警数不作为所选时间窗口的证据展示。",
+      "query": {
+        "loading": "正在加载信号证据…",
+        "empty": "该时间窗口没有证据。",
+        "truncated": "当前展示匹配证据的有界子集。",
+        "truncationUnknown": "结果完整性未知。",
+        "runtimeError": "可视化运行时无法渲染该证据。",
+        "investigationActions": "调查操作（{{count}} 条）",
+        "invalid": "信号请求无效。",
+        "permission": "没有权限查看该信号。",
+        "overloaded": "信号存储繁忙，请重试。",
+        "unavailable": "信号存储不可用。",
+        "contract": "信号存储返回了无效响应。"
+      }
+    },
     "topology": { "view": "查看拓扑" },
     "discovery": {
       "action": "发现资源",
@@ -498,6 +579,7 @@
     "datasource": "数据源",
     "queryMode": "查询模式",
     "trend": "指标趋势",
+    "chartUnavailable": "指标图表暂时不可用，采样数据仍可在下方查看。",
     "filter": "标签条件 key=value",
     "groupBy": "按标签分组",
     "aggregation": "聚合方式",
@@ -513,6 +595,7 @@
   },
   "exploreLog": {
     "mode": "日志模式",
+    "history": "历史",
     "query": "查询",
     "live": "实时",
     "detail": "日志详情",
@@ -541,6 +624,7 @@
     "overview": "日志概览",
     "trend": "日志趋势",
     "trendEmpty": "此查询未返回趋势时间桶。",
+    "trendInsufficient": "当前窗口只有一个时间桶（{{count}} 条日志）。",
     "statisticsUnavailable": "此统计区域无法加载。",
     "statistics": {
       "total": "总计",
@@ -1435,6 +1519,94 @@
       "collapseCard": "收起面板",
       "expandCard": "展开面板",
       "resizeHistory": "调整历史区高度"
+    }
+  },
+  "monitorSignals": {
+    "title": "监控信号证据",
+    "availability": "信号可用性",
+    "window": "调查窗口：{{start}} – {{end}} · {{timeZone}}",
+    "windowUnavailable": "调查窗口不可用。",
+    "source": "来源",
+    "capabilities": {
+      "nativeMetrics": "原生指标",
+      "currentAlerts": "当前告警",
+      "collection": "采集状态",
+      "boundEntity": "绑定实体",
+      "otlpEvidence": "OTLP 证据"
+    },
+    "states": { "ready": "可用", "empty": "无数据", "unavailable": "不可用", "unknown": "未知" },
+    "sections": {
+      "currentAlerts": "当前告警",
+      "collectionHealth": "采集状态",
+      "boundEntity": "绑定实体",
+      "otelEvidence": "相关 OTLP 证据"
+    },
+    "alerts": {
+      "scope": "当前状态 · 不是所选窗口内的历史记录",
+      "notRecorded": "未记录",
+      "activeCount_one": "当前 {{count}} 条活跃告警",
+      "activeCount_other": "当前 {{count}} 条活跃告警",
+      "empty": "当前没有活跃告警；这不代表所选窗口内没有历史告警。",
+      "unavailable": "当前告警证据不可用。",
+      "unknown": "尚未确定当前告警证据。"
+    },
+    "collection": {
+      "last": "最近采集",
+      "duration": "耗时",
+      "outcome": "结果",
+      "collector": "采集器",
+      "notRecorded": "未记录",
+      "failurePhase": "失败阶段",
+      "failureClass": "失败类型",
+      "empty": "该调查窗口内没有观测到采集执行。",
+      "unavailable": "采集执行证据不可用。",
+      "unknown": "尚未确定采集执行证据。",
+      "outcomes": { "success": "成功", "failure": "失败" },
+      "phases": {
+        "UNKNOWN": "未知阶段",
+        "RESOLVE": "解析",
+        "CONNECT": "连接",
+        "AUTHENTICATE": "认证",
+        "QUERY": "查询",
+        "PARSE": "解析响应",
+        "CONVERT": "转换",
+        "DISPATCH": "分发"
+      },
+      "failureClasses": {
+        "NONE": "无失败",
+        "UNAVAILABLE": "不可用",
+        "UNREACHABLE": "无法到达",
+        "UNCONNECTABLE": "连接失败",
+        "COLLECTION": "采集失败",
+        "TIMEOUT": "超时",
+        "UNKNOWN": "未知失败"
+      }
+    },
+    "entity": {
+      "serviceName": "服务名称",
+      "type": "实体类型",
+      "id": "实体 ID",
+      "namespace": "服务命名空间",
+      "environment": "环境",
+      "open": "打开实体",
+      "empty": "该监控尚未绑定实体。",
+      "unavailable": "实体绑定证据不可用。",
+      "unknown": "尚未确定实体绑定证据。"
+    },
+    "otel": {
+      "scope": "仅提供该精确绑定中实际观测到的信号；探索跳转会保留调查窗口和时区。",
+      "open": "在探索中打开{{signal}}",
+      "empty": "该绑定未观测到相关 OTLP 信号。",
+      "noEntity": "必须绑定实体才能安全关联 OTLP 证据。",
+      "unavailable": "相关 OTLP 证据不可用。",
+      "unknown": "尚未确定相关 OTLP 证据。"
+    },
+    "signals": { "metrics": "OTLP 指标", "logs": "日志", "traces": "链路" },
+    "sources": {
+      "currentAlerts": "当前告警",
+      "collection": "Greptime 采集事件",
+      "entityBinding": "监控与实体绑定",
+      "otelBinding": "已观测绑定信号"
     }
   },
   "settingsNavigation": {
@@ -3269,6 +3441,7 @@
     },
     "summaryUnavailable": "告警概览暂不可用，仍可继续查询告警列表。",
     "investigate": "调查",
+    "askAi": "询问 AI",
     "openMonitor": "监控",
     "openEntity": "资源",
     "listUnavailable": "告警列表暂不可用。",
@@ -3809,6 +3982,72 @@
       "apiKey": "API 密钥",
       "apiKeyHint": "留空可保留现有密钥。",
       "save": "保存提供方"
+    }
+  },
+  "alertInvestigation": {
+    "title": "告警调查",
+    "unnamedAlert": "未命名告警",
+    "exactWindow": "精确时间窗口",
+    "anchor": "告警锚点",
+    "availability": "证据可用性",
+    "notRecorded": "未记录",
+    "sections": {
+      "metrics": "告警指标",
+      "logs": "日志",
+      "traces": "追踪",
+      "topology": "拓扑",
+      "collection": "采集健康"
+    },
+    "states": { "available": "可用", "empty": "此范围内无证据", "unavailable": "证据不可用" },
+    "actions": {
+      "back": "返回告警",
+      "retry": "重试",
+      "openMetrics": "打开指标",
+      "openLog": "打开日志",
+      "openTrace": "打开追踪",
+      "openTopology": "打开拓扑"
+    },
+    "query": {
+      "loading": "正在加载精确告警证据…",
+      "invalidRoute": "告警调查链接不完整或无效。",
+      "invalid": "证据查询无效。",
+      "permission": "你无权查看此证据。",
+      "overloaded": "证据服务负载过高。",
+      "unavailable": "告警调查暂不可用。",
+      "contract": "告警证据不符合预期合同。",
+      "runtimeError": "证据运行时无法呈现此结果。",
+      "truncated": "仅显示有界结果集。",
+      "truncationUnknown": "完整结果数量未知。"
+    },
+    "metrics": { "before": "之前", "anchor": "告警", "after": "之后" },
+    "logs": { "focusActions": "可聚焦调查的日志" },
+    "traces": {
+      "traceId": "Trace ID",
+      "service": "服务",
+      "start": "开始",
+      "duration": "持续时间",
+      "status": "状态",
+      "spans": "Span 数"
+    },
+    "traceStatus": { "error": "错误", "ok": "正常", "unset": "未设置", "unknown": "未知" },
+    "topology": {
+      "source": "来源",
+      "target": "目标",
+      "relation": "关系",
+      "confidence": "置信度",
+      "requests": "请求数",
+      "errors": "错误数"
+    },
+    "collection": {
+      "lastCollection": "最近采集",
+      "duration": "持续时间",
+      "outcome": "结果",
+      "collector": "采集器",
+      "target": "目标",
+      "metricSet": "指标集",
+      "failureClass": "失败类型",
+      "phase": "阶段",
+      "notRecorded": "未记录"
     }
   },
   "aiSchedules": {

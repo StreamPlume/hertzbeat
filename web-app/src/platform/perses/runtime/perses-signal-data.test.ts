@@ -1,0 +1,423 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import type {
+  HertzBeatLogRow,
+  HertzBeatTableData,
+  HertzBeatTraceDetail,
+  HertzBeatTraceRow
+} from '../datasource/hertzbeat-query-schema';
+import {
+  orderHertzBeatLogRowsForPerses,
+  toPersesLogData,
+  toPersesTraceDetailData,
+  toPersesTraceSearchData
+} from './perses-signal-data';
+
+const timeWindow = { from: 1_750_000_000_000, to: 1_750_000_060_000 } as const;
+
+describe('HertzBeat to Perses signal data', () => {
+  it('maps bounded log rows without inventing missing evidence', () => {
+    const data: HertzBeatTableData<HertzBeatLogRow> = {
+      total: 3,
+      rows: [
+        {
+          logRecordUid: 'event-1',
+          timeUnixNano: '1750000001000000000',
+          observedTimeUnixNano: null,
+          severityNumber: 17,
+          severityText: 'ERROR',
+          body: { message: 'checkout failed', attempt: 2 },
+          attributes: { 'http.route': '/orders', nested: { ignored: true } },
+          droppedAttributesCount: 0,
+          traceId: '0123456789abcdef0123456789abcdef',
+          spanId: '0123456789abcdef',
+          traceFlags: 1,
+          resource: { 'service.name': 'checkout' },
+          resourceSchemaUrl: null,
+          instrumentationScope: null,
+          scopeSchemaUrl: null
+        }
+      ]
+    };
+
+    expect(toPersesLogData(data, timeWindow)).toEqual({
+      timeRange: { start: new Date(timeWindow.from), end: new Date(timeWindow.to) },
+      entries: [
+        {
+          timestamp: 1_750_000_001,
+          line: '{"message":"checkout failed","attempt":2}',
+          labels: {
+            'resource.service.name': 'checkout',
+            'attribute.http.route': '/orders',
+            severity: 'ERROR',
+            trace_id: '0123456789abcdef0123456789abcdef',
+            span_id: '0123456789abcdef'
+          }
+        }
+      ],
+      totalCount: 3,
+      hasMore: true,
+      direction: 'backward'
+    });
+    expect(toPersesLogData(data, timeWindow).entries[0]!.timestamp * 1_000).toBe(1_750_000_001_000);
+  });
+
+  it('rejects a log row without an observed timestamp instead of fabricating one', () => {
+    const row = {
+      logRecordUid: null,
+      timeUnixNano: null,
+      observedTimeUnixNano: null,
+      severityNumber: null,
+      severityText: null,
+      body: 'missing timestamp',
+      attributes: null,
+      droppedAttributesCount: null,
+      traceId: null,
+      spanId: null,
+      traceFlags: null,
+      resource: null,
+      resourceSchemaUrl: null,
+      instrumentationScope: null,
+      scopeSchemaUrl: null
+    } satisfies HertzBeatLogRow;
+
+    expect(() => toPersesLogData({ rows: [row], total: 1 }, timeWindow)).toThrow('Perses signal data');
+  });
+
+  it('derives display seconds from a lossless decimal timestamp without casting raw nanoseconds', () => {
+    const row = {
+      logRecordUid: 'event-1',
+      timeUnixNano: '1750000001000000123',
+      observedTimeUnixNano: null,
+      severityNumber: null,
+      severityText: 'INFO',
+      body: 'selected log',
+      attributes: null,
+      droppedAttributesCount: null,
+      traceId: null,
+      spanId: null,
+      traceFlags: null,
+      resource: null,
+      resourceSchemaUrl: null,
+      instrumentationScope: null,
+      scopeSchemaUrl: null
+    } satisfies HertzBeatLogRow;
+
+    expect(toPersesLogData({ rows: [row], total: 1 }, timeWindow).entries[0]?.timestamp).toBeCloseTo(
+      1_750_000_001.0000002,
+      7
+    );
+  });
+
+  it('shares the timestamp-descending Perses row order with host-owned row inspection', () => {
+    const older = logRow({ logRecordUid: 'older', timeUnixNano: '1750000001000000000', body: 'older' });
+    const newest = logRow({ logRecordUid: 'newest', timeUnixNano: '1750000003000000000', body: 'newest' });
+    const middle = logRow({
+      logRecordUid: 'middle',
+      timeUnixNano: null,
+      observedTimeUnixNano: '1750000002000000000',
+      body: 'middle'
+    });
+    const rows = [older, newest, middle];
+
+    expect(orderHertzBeatLogRowsForPerses(rows).map(row => row.logRecordUid)).toEqual(['newest', 'middle', 'older']);
+    expect(toPersesLogData({ rows, total: rows.length }, timeWindow).entries.map(entry => entry.line)).toEqual([
+      'newest',
+      'middle',
+      'older'
+    ]);
+  });
+
+  it('maps complete per-service trace statistics without attributing totals to the root service', () => {
+    const row = {
+      traceId: '0123456789abcdef0123456789abcdef',
+      rootSpanId: '0123456789abcdef',
+      serviceName: 'checkout',
+      serviceNamespace: 'commerce',
+      rootSpanName: 'POST /orders',
+      durationNanos: 12_500_000,
+      status: 'ERROR',
+      startTime: 1_750_000_001_000,
+      spanCount: 4,
+      errorSpanCount: 1,
+      serviceStats: {
+        checkout: { spanCount: 2, errorCount: 0 },
+        'cart-db': { spanCount: 2, errorCount: 1 }
+      },
+      resourceAttributes: { 'service.name': 'checkout' }
+    } satisfies HertzBeatTraceRow;
+
+    expect(toPersesTraceSearchData({ rows: [row], total: 2 }, true)).toEqual({
+      searchResult: [
+        {
+          traceId: '0123456789abcdef0123456789abcdef',
+          rootServiceName: 'checkout',
+          rootTraceName: 'POST /orders',
+          startTimeUnixMs: 1_750_000_001_000,
+          durationMs: 12.5,
+          serviceStats: {
+            checkout: { spanCount: 2, errorCount: 0 },
+            'cart-db': { spanCount: 2, errorCount: 1 }
+          }
+        }
+      ],
+      metadata: { hasMoreResults: true }
+    });
+  });
+
+  it.each([{ serviceName: null }, { serviceName: '   ' }, { rootSpanName: null }, { rootSpanName: '   ' }])(
+    'rejects trace table rows without a proven root identity',
+    override => {
+      const row = {
+        traceId: '0123456789abcdef0123456789abcdef',
+        rootSpanId: '0123456789abcdef',
+        serviceName: 'checkout',
+        serviceNamespace: 'commerce',
+        rootSpanName: 'POST /orders',
+        durationNanos: 12_500_000,
+        status: 'OK',
+        startTime: 1_750_000_001_000,
+        spanCount: 1,
+        errorSpanCount: 0,
+        serviceStats: { checkout: { spanCount: 1, errorCount: 0 } },
+        resourceAttributes: null,
+        ...override
+      } satisfies HertzBeatTraceRow;
+
+      expect(() => toPersesTraceSearchData({ rows: [row], total: 1 }, false)).toThrow('Perses signal data');
+    }
+  );
+
+  it('maps trace details into the official OTLP trace model for TracingGanttChart', () => {
+    const detail = traceDetail();
+    const result = toPersesTraceDetailData(detail);
+
+    expect(result.trace?.resourceSpans).toHaveLength(2);
+    expect(result.trace?.resourceSpans[0]).toMatchObject({
+      resource: {
+        attributes: [
+          { key: 'service.name', value: { stringValue: 'checkout' } },
+          { key: 'service.namespace', value: { stringValue: 'commerce' } }
+        ]
+      },
+      scopeSpans: [
+        {
+          scope: { name: 'checkout-http', version: '1.0.0' },
+          spans: [
+            {
+              traceId: '0123456789abcdef0123456789abcdef',
+              spanId: '0123456789abcdef',
+              name: 'POST /orders',
+              startTimeUnixNano: '1750000001000000000',
+              endTimeUnixNano: '1750000001010000000',
+              status: { code: 'STATUS_CODE_OK' }
+            }
+          ]
+        }
+      ]
+    });
+    expect(result.trace?.resourceSpans[1]?.scopeSpans[0]?.spans[0]).toMatchObject({
+      spanId: 'fedcba9876543210',
+      parentSpanId: '0123456789abcdef',
+      status: { code: 'STATUS_CODE_ERROR', message: 'database unavailable' },
+      links: [{ traceId: 'fedcba9876543210fedcba9876543210', spanId: '1111111111111111' }]
+    });
+  });
+
+  it('preserves epoch nanoseconds above Number.MAX_SAFE_INTEGER as exact OTLP decimal strings', () => {
+    const detail = traceDetail();
+    detail.spans[1]!.events = [
+      {
+        timeUnixNano: '1750000001005000123',
+        name: 'exception',
+        attributes: {},
+        droppedAttributesCount: 0
+      }
+    ];
+
+    expect(
+      toPersesTraceDetailData(detail).trace?.resourceSpans[1]?.scopeSpans[0]?.spans[0]?.events?.[0]?.timeUnixNano
+    ).toBe('1750000001005000123');
+  });
+
+  it('preserves contract-valid string event attributes', () => {
+    const detail = traceDetail();
+    detail.spans[1]!.events = [
+      {
+        timeUnixNano: '1000000',
+        name: 'test event',
+        attributes: { present: 'evidence' },
+        droppedAttributesCount: 0
+      }
+    ];
+
+    expect(detail.spans).not.toBeNull();
+    const event = toPersesTraceDetailData(detail).trace?.resourceSpans[1]?.scopeSpans[0]?.spans[0]?.events?.[0];
+    expect(event?.attributes).toEqual([{ key: 'present', value: { stringValue: 'evidence' } }]);
+  });
+
+  it('rejects unsafe integer log attributes instead of stringifying rounded labels', () => {
+    const row = {
+      logRecordUid: 'event-1',
+      timeUnixNano: '1750000001000000000',
+      observedTimeUnixNano: null,
+      severityNumber: null,
+      severityText: null,
+      body: 'unsafe evidence',
+      attributes: { sequence: 9_007_199_254_740_992 },
+      droppedAttributesCount: null,
+      traceId: null,
+      spanId: null,
+      traceFlags: null,
+      resource: null,
+      resourceSchemaUrl: null,
+      instrumentationScope: null,
+      scopeSchemaUrl: null
+    } satisfies HertzBeatLogRow;
+
+    expect(() => toPersesLogData({ rows: [row], total: 1 }, timeWindow)).toThrow('Perses signal data');
+  });
+
+  it('rejects unsafe integers nested in a structured log body instead of displaying rounded evidence', () => {
+    const row = logRow({
+      body: { request: { sequence: 9_007_199_254_740_992 } }
+    });
+
+    expect(() => toPersesLogData({ rows: [row], total: 1 }, timeWindow)).toThrow('Perses signal data');
+  });
+
+  it('preserves safe nested structured log bodies', () => {
+    const row = logRow({
+      body: {
+        request: { sequence: 9_007_199_254_740_991, ratio: 1.25 },
+        accepted: true,
+        result: null
+      }
+    });
+
+    expect(toPersesLogData({ rows: [row], total: 1 }, timeWindow).entries[0]?.line).toBe(
+      '{"request":{"sequence":9007199254740991,"ratio":1.25},"accepted":true,"result":null}'
+    );
+  });
+
+  it.each(['event', 'link'])('rejects unsafe integer %s attributes instead of fabricating OTLP evidence', kind => {
+    const detail = traceDetail();
+    if (kind === 'event') {
+      detail.spans[1]!.events = [
+        {
+          timeUnixNano: '1750000001005000123',
+          name: 'exception',
+          attributes: { sequence: 9_007_199_254_740_992 as unknown as string },
+          droppedAttributesCount: 0
+        }
+      ];
+    } else {
+      detail.spans[1]!.links = [
+        {
+          traceId: 'fedcba9876543210fedcba9876543210',
+          spanId: '1111111111111111',
+          traceState: null,
+          attributes: { sequence: 9_007_199_254_740_992 as unknown as string },
+          droppedAttributesCount: 0
+        }
+      ];
+    }
+
+    expect(() => toPersesTraceDetailData(detail)).toThrow('Perses signal data');
+  });
+});
+
+function logRow(overrides: Partial<HertzBeatLogRow> = {}): HertzBeatLogRow {
+  return {
+    logRecordUid: 'event-1',
+    timeUnixNano: '1750000001000000000',
+    observedTimeUnixNano: null,
+    severityNumber: null,
+    severityText: null,
+    body: 'log body',
+    attributes: null,
+    droppedAttributesCount: null,
+    traceId: null,
+    spanId: null,
+    traceFlags: null,
+    resource: null,
+    resourceSchemaUrl: null,
+    instrumentationScope: null,
+    scopeSchemaUrl: null,
+    ...overrides
+  };
+}
+
+function traceDetail(): HertzBeatTraceDetail {
+  return {
+    traceId: '0123456789abcdef0123456789abcdef',
+    rootSpanId: '0123456789abcdef',
+    serviceName: 'checkout',
+    serviceNamespace: 'commerce',
+    rootSpanName: 'POST /orders',
+    durationNanos: '10000000',
+    status: 'OK',
+    startTime: 1_750_000_001_000,
+    errorSpanCount: 1,
+    resourceAttributes: { 'service.name': 'checkout', 'service.namespace': 'commerce' },
+    spans: [
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+        parentSpanId: null,
+        spanName: 'POST /orders',
+        serviceName: 'checkout',
+        status: 'OK',
+        spanKind: 'SERVER',
+        statusMessage: null,
+        traceState: null,
+        scopeName: 'checkout-http',
+        scopeVersion: '1.0.0',
+        durationNanos: '10000000',
+        startTime: 1_750_000_001_000,
+        highlighted: false,
+        resourceAttributes: { 'service.name': 'checkout', 'service.namespace': 'commerce' },
+        spanAttributes: { 'http.route': '/orders' },
+        events: [],
+        links: [],
+        codeNavigationHint: null
+      },
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: 'fedcba9876543210',
+        parentSpanId: '0123456789abcdef',
+        spanName: 'SELECT cart',
+        serviceName: 'cart-db',
+        status: 'ERROR',
+        spanKind: 'CLIENT',
+        statusMessage: 'database unavailable',
+        traceState: null,
+        scopeName: 'jdbc',
+        scopeVersion: null,
+        durationNanos: '2000000',
+        startTime: 1_750_000_001_004,
+        highlighted: true,
+        resourceAttributes: { 'service.name': 'cart-db' },
+        spanAttributes: { 'db.system': 'postgresql' },
+        events: [],
+        links: [
+          {
+            traceId: 'fedcba9876543210fedcba9876543210',
+            spanId: '1111111111111111',
+            traceState: null,
+            attributes: {},
+            droppedAttributesCount: 0
+          }
+        ],
+        codeNavigationHint: null
+      }
+    ]
+  };
+}

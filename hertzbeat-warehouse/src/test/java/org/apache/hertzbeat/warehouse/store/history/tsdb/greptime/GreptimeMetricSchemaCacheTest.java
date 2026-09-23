@@ -19,6 +19,9 @@ package org.apache.hertzbeat.warehouse.store.history.tsdb.greptime;
 
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.greptime.models.TableSchema;
 import java.util.List;
@@ -33,6 +36,34 @@ import org.junit.jupiter.api.Test;
 class GreptimeMetricSchemaCacheTest {
 
     @Test
+    void reservesSystemDimensionColumnsAndRetainsSourceAlignment() {
+        GreptimeMetricSchemaCache cache = new GreptimeMetricSchemaCache(8);
+        List<CollectRep.Field> fields = List.of(
+                field("hertzbeat_workspace_id", CommonConstants.TYPE_STRING, true),
+                field("usage", CommonConstants.TYPE_NUMBER, false),
+                field("INSTANCE", CommonConstants.TYPE_STRING, true),
+                field("unsupported", Integer.MAX_VALUE, false),
+                field("device", CommonConstants.TYPE_STRING, true));
+
+        GreptimeMetricSchemaCache.ResolvedSchema resolved = cache.resolve("linux_cpu", fields);
+
+        assertEquals(List.of(1, 4), resolved.sourceIndexes());
+        assertEquals(List.of("hertzbeat_workspace_id", "INSTANCE"), resolved.rejectedNames());
+        assertTrue(resolved.schemaChanged());
+        assertEquals(List.of(
+                "hertzbeat_workspace_id",
+                "hertzbeat_entity_id",
+                "hertzbeat_entity_type",
+                "hertzbeat_monitor_id",
+                "hertzbeat_collector_id",
+                "instance",
+                "ts",
+                "usage",
+                "device"), resolved.schema().getColumnNames());
+        assertFalse(cache.resolve("linux_cpu", fields).schemaChanged());
+    }
+
+    @Test
     void reusesEquivalentSchemaAndRebuildsAfterEvolution() {
         GreptimeMetricSchemaCache cache = new GreptimeMetricSchemaCache(8);
         CollectRep.Field usage = field("usage", CommonConstants.TYPE_NUMBER, false);
@@ -44,6 +75,22 @@ class GreptimeMetricSchemaCacheTest {
 
         assertSame(initial, cache.getOrCreate("linux_cpu", List.of(equivalentUsage, device)));
         assertNotSame(initial, cache.getOrCreate("linux_cpu", List.of(changedUsage, device)));
+    }
+
+    @Test
+    void recalculatesSourceIndexesWhenEquivalentSchemaHasCollisionsInDifferentPositions() {
+        GreptimeMetricSchemaCache cache = new GreptimeMetricSchemaCache(8);
+        CollectRep.Field usage = field("usage", CommonConstants.TYPE_NUMBER, false);
+        CollectRep.Field device = field("device", CommonConstants.TYPE_STRING, true);
+
+        GreptimeMetricSchemaCache.ResolvedSchema first = cache.resolve("linux_cpu", List.of(
+                field("instance", CommonConstants.TYPE_STRING, true), usage, device));
+        GreptimeMetricSchemaCache.ResolvedSchema second = cache.resolve("linux_cpu", List.of(
+                usage, field("HERTZBEAT_ENTITY_ID", CommonConstants.TYPE_STRING, true), device));
+
+        assertSame(first.schema(), second.schema());
+        assertEquals(List.of(1, 2), first.sourceIndexes());
+        assertEquals(List.of(0, 2), second.sourceIndexes());
     }
 
     @Test

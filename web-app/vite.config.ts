@@ -78,6 +78,23 @@ export default defineConfig({
     }
   },
   test: {
+    // Perses packages expose ESM through `module` but no exports map, so Node's
+    // test loader otherwise selects their CJS graph and creates a second React
+    // Query context. Production Vite already selects these ESM entries.
+    alias: [
+      {
+        find: /^@perses-dev\/components$/,
+        replacement: fileURLToPath(new URL('./node_modules/@perses-dev/components/dist/index.js', import.meta.url))
+      },
+      {
+        find: /^@perses-dev\/dashboards$/,
+        replacement: fileURLToPath(new URL('./node_modules/@perses-dev/dashboards/dist/index.js', import.meta.url))
+      },
+      {
+        find: /^@perses-dev\/plugin-system$/,
+        replacement: fileURLToPath(new URL('./node_modules/@perses-dev/plugin-system/dist/index.js', import.meta.url))
+      }
+    ],
     environment: 'jsdom',
     exclude: [...configDefaults.exclude, '.tmp/**', 'scripts/**', 'tests/browser/**'],
     maxWorkers: vitestResourcePolicy.maxWorkers,

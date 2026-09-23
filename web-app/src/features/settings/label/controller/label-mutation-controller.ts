@@ -16,7 +16,7 @@
  */
 
 import { useDelete, useDeleteMany, useNotification, type HttpError } from '@refinedev/core';
-import { useCallback, useRef, type RefObject } from 'react';
+import { useCallback, useRef, type MutableRefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useExclusiveOperation, type ExclusiveOperation } from '@/shared/exclusive-operation';
@@ -88,7 +88,7 @@ function useDeleteLabel(
   t: Translate,
   onDeleteConfirmed: (deletedRecords: number) => void,
   canDelete: boolean,
-  confirmedDeletedIdsRef: RefObject<Set<number>>
+  confirmedDeletedIdsRef: MutableRefObject<Set<number>>
 ) {
   return useCallback(
     (record: LabelRecord) => {
@@ -121,7 +121,7 @@ function useDeleteLabels(
   recovery: LabelSaveRecoveryController,
   onDeleteConfirmed: (deletedRecords: number) => void,
   canDelete: boolean,
-  confirmedDeletedIdsRef: RefObject<Set<number>>
+  confirmedDeletedIdsRef: MutableRefObject<Set<number>>
 ) {
   return useCallback(
     (records: LabelRecord[], onConfirmed?: () => void) => {

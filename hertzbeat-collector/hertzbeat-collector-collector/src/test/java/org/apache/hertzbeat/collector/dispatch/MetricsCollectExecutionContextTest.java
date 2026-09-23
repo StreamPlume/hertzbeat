@@ -18,8 +18,10 @@
 package org.apache.hertzbeat.collector.dispatch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.apache.hertzbeat.common.constants.MetricDataConstants;
+import org.apache.hertzbeat.common.entity.metric.NativeMetricSystemContext;
 import org.apache.hertzbeat.common.entity.message.CollectRep;
 import org.junit.jupiter.api.Test;
 
@@ -28,16 +30,28 @@ class MetricsCollectExecutionContextTest {
     @Test
     void addsCompactExecutionContextToArrowSchemaMetadata() {
         CollectRep.MetricsData.Builder builder = CollectRep.MetricsData.newBuilder()
+                .setId(42L)
                 .setApp("linux")
                 .setMetrics("cpu")
                 .setTime(1_700L)
                 .setCode(CollectRep.Code.SUCCESS);
+        builder.addMetadata(MetricDataConstants.INSTANCE, "db.internal:3306");
+        builder.addMetadata("hertzbeat.workspace.id", "spoof-workspace");
+        builder.addMetadata(MetricDataConstants.ENTITY_ID, "999");
+        builder.addMetadata("hertzbeat.entity.type", "spoof-type");
 
         MetricsCollect.addExecutionContext(builder, 1_000L, "collector-arm-1");
 
         try (CollectRep.MetricsData metricsData = builder.build()) {
             assertEquals("1000", metricsData.getMetadataValue(MetricDataConstants.COLLECTION_STARTED_AT));
             assertEquals("collector-arm-1", metricsData.getMetadataValue(MetricDataConstants.COLLECTOR_ID));
+            NativeMetricSystemContext context = NativeMetricSystemContext.from(metricsData);
+            assertEquals(42L, context.monitorId());
+            assertEquals("collector-arm-1", context.collectorId());
+            assertEquals("db.internal:3306", context.instance());
+            assertNull(context.workspaceId());
+            assertNull(context.entityId());
+            assertNull(context.entityType());
         }
     }
 }

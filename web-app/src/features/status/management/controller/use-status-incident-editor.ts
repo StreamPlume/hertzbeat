@@ -18,7 +18,7 @@ type IncidentEditorView = { incident?: StatusIncident; loading: boolean; error?:
 type DetailRequest = {
   id: number;
   controller: AbortController;
-  current: React.RefObject<AbortController | undefined>;
+  current: React.MutableRefObject<AbortController | undefined>;
   setView: Dispatch<SetStateAction<IncidentEditorView>>;
   reportLoadFailure: ((error: unknown) => void) | undefined;
 };
